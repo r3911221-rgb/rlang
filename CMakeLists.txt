@@ -9,6 +9,7 @@ add_executable(r
     src/lexer/lexer.cpp
     src/ast/ast.cpp
     src/parser/parser.cpp
+    src/semantic/semantic.cpp
 )
 
 target_include_directories(r PRIVATE src)
