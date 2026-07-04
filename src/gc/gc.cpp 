@@ -1,0 +1,131 @@
+#include "gc/gc.h"
+#include <iostream>
+
+namespace r::vm {
+
+GC::GC() = default;
+
+GC::~GC() {
+    GCObject* object = objects_;
+    while (object != nullptr) {
+        GCObject* next = object->next;
+        delete object;
+        object = next;
+    }
+}
+
+GCString* GC::allocateString(const std::string& str) {
+    auto* string = new GCString();
+    string->data = str;
+    string->next = objects_;
+    objects_ = string;
+    bytesAllocated_ += string->size();
+    return string;
+}
+
+GCArray* GC::allocateArray(const std::vector<Value>& elems) {
+    auto* array = new GCArray();
+    array->elements = elems;
+    array->next = objects_;
+    objects_ = array;
+    bytesAllocated_ += array->size();
+    return array;
+}
+
+GCClosure* GC::allocateClosure(size_t funcIndex) {
+    auto* closure = new GCClosure();
+    closure->funcIndex = funcIndex;
+    closure->next = objects_;
+    objects_ = closure;
+    bytesAllocated_ += closure->size();
+    return closure;
+}
+
+void GC::collect(std::vector<Value>& stack, std::unordered_map<std::string, Value>& globals) {
+    if (debug_) std::cerr << "-- gc begin\n";
+
+    markRoots(stack, globals);
+    traceReferences();
+    sweep();
+
+    nextGC_ = bytesAllocated_ * 2;
+    if (nextGC_ < 1024 * 1024) nextGC_ = 1024 * 1024;
+
+    if (debug_) std::cerr << "-- gc end\n";
+}
+
+void GC::markRoots(std::vector<Value>& stack, std::unordered_map<std::string, Value>& globals) {
+    for (auto& value : stack) {
+        markValue(value);
+    }
+    for (auto& pair : globals) {
+        markValue(pair.second);
+    }
+}
+
+void GC::markValue(Value& value) {
+    if (value.type == ValueType::String && value.s.empty()) return;
+    if (value.type == ValueType::Array) {
+        for (auto& elem : value.array) {
+            markValue(elem);
+        }
+    }
+}
+
+void GC::markObject(GCObject* object) {
+    if (object == nullptr || object->marked) return;
+    object->marked = true;
+    if (object->type == GCObject::Type::Array) {
+        auto* array = static_cast<GCArray*>(object);
+        for (auto& elem : array->elements) {
+            markValue(elem);
+        }
+    } else if (object->type == GCObject::Type::Closure) {
+        auto* closure = static_cast<GCClosure*>(object);
+        for (auto& upval : closure->upvalues) {
+            markValue(upval);
+        }
+    }
+}
+
+void GC::traceReferences() {
+    bool changed = true;
+    while (changed) {
+        changed = false;
+        GCObject* object = objects_;
+        while (object != nullptr) {
+            if (object->marked && !changed) {
+                if (object->type == GCObject::Type::Array) {
+                    auto* array = static_cast<GCArray*>(object);
+                    for (auto& elem : array->elements) {
+                        if (elem.type == ValueType::Array) {
+                            for (auto& e : elem.array) {
+                                if (e.type == ValueType::String && !e.s.empty()) {
+                                    // mark nested
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            object = object->next;
+        }
+    }
+}
+
+void GC::sweep() {
+    GCObject** object = &objects_;
+    while (*object != nullptr) {
+        if (!(*object)->marked) {
+            GCObject* unreached = *object;
+            *object = unreached->next;
+            bytesAllocated_ -= unreached->size();
+            delete unreached;
+        } else {
+            (*object)->marked = false;
+            object = &(*object)->next;
+        }
+    }
+}
+
+} // namespace r::vm
