@@ -1,14 +1,17 @@
 #include "semantic.h"
-#include <sstream>
 
 namespace r::semantic {
 
-// ------------------------------------------------------------------
-// Type
-// ------------------------------------------------------------------
 Type Type::Array(const Type& elem) {
     Type t(TypeKind::Array);
     t.elementType = std::make_shared<Type>(elem);
+    return t;
+}
+
+Type Type::Function(const std::vector<Type>& params, const Type& ret) {
+    Type t(TypeKind::Function);
+    t.paramTypes = params;
+    t.returnType = ret;
     return t;
 }
 
@@ -58,15 +61,10 @@ std::string Type::toString() const {
     return "?";
 }
 
-// ------------------------------------------------------------------
-// Scope
-// ------------------------------------------------------------------
 Scope::Scope(Scope* parent) : parent_(parent) {}
 
 bool Scope::declare(const Symbol& sym) {
-    if (symbols_.find(sym.name) != symbols_.end()) {
-        return false; // already exists
-    }
+    if (symbols_.find(sym.name) != symbols_.end()) return false;
     symbols_[sym.name] = sym;
     return true;
 }
@@ -84,17 +82,18 @@ Symbol* Scope::lookupLocal(const std::string& name) {
     return nullptr;
 }
 
-// ------------------------------------------------------------------
-// Semantic Analyzer
-// ------------------------------------------------------------------
 SemanticAnalyzer::SemanticAnalyzer()
     : currentScope_(nullptr), inLoop_(false), hasReturn_(false) {}
 
 std::vector<SemanticError> SemanticAnalyzer::analyze(ast::Program* program) {
     errors_.clear();
-    pushScope(); // global scope
+    pushScope();
 
-    // First pass: declare all top-level items
+    Symbol printlnSym{"println", Type::Function({Type::Unknown()}, Type::Void()), SymbolKind::Function, false, true, 0, 0};
+    currentScope_->declare(printlnSym);
+    Symbol printSym{"print", Type::Function({Type::Unknown()}, Type::Void()), SymbolKind::Function, false, true, 0, 0};
+    currentScope_->declare(printSym);
+
     for (auto& item : program->items) {
         if (auto* func = dynamic_cast<ast::FunctionItem*>(item.get())) {
             Type retType = func->returnType ? astTypeToSemantic(func->returnType.get()) : Type::Void();
@@ -132,7 +131,6 @@ std::vector<SemanticError> SemanticAnalyzer::analyze(ast::Program* program) {
         }
     }
 
-    // Second pass: resolve bodies
     for (auto& item : program->items) {
         if (auto* func = dynamic_cast<ast::FunctionItem*>(item.get())) {
             resolveFunction(func);
@@ -150,21 +148,12 @@ void SemanticAnalyzer::pushScope() {
 }
 
 void SemanticAnalyzer::popScope() {
-    if (currentScope_) {
-        currentScope_ = currentScope_->lookup("") ? nullptr : currentScope_; // dummy
-        // Actually we need to track parent properly
-        // Since Scope has parent pointer, we can just traverse back
-        if (currentScope_ && currentScope_->lookupLocal("__root__") == nullptr) {
-            // This is a hack; better to track scope stack separately
-        }
-    }
     if (!scopes_.empty()) {
-        // We can't easily pop from unique_ptr vector and maintain parent
-        // Instead, let's track a stack of raw pointers
+        scopes_.pop_back();
+        currentScope_ = scopes_.empty() ? nullptr : scopes_.back().get();
     }
 }
 
-// Better approach: maintain a stack
 void SemanticAnalyzer::error(const std::string& msg, uint32_t line, uint32_t col) {
     errors_.push_back({msg, line, col});
 }
@@ -191,8 +180,6 @@ Type SemanticAnalyzer::astTypeToSemantic(ast::Type* type) {
 
 Type SemanticAnalyzer::resolveFunction(ast::FunctionItem* func) {
     pushScope();
-
-    // Declare parameters
     for (auto& p : func->params) {
         Type pType = astTypeToSemantic(p.type.get());
         Symbol sym{p.name, pType, SymbolKind::Parameter, false, true, 0, 0};
@@ -200,22 +187,16 @@ Type SemanticAnalyzer::resolveFunction(ast::FunctionItem* func) {
             error("Parameter '" + p.name + "' already declared");
         }
     }
-
     Type retType = func->returnType ? astTypeToSemantic(func->returnType.get()) : Type::Void();
     currentFunctionReturnType_ = retType;
     hasReturn_ = false;
-
     Type bodyType = resolveBlock(func->body.get());
-
-    // If function declares return type, block must match (or have explicit return)
     if (retType != Type::Void() && retType != Type::Never() && !hasReturn_) {
-        // For now, if last expression matches return type, that's okay
         if (bodyType != retType && !bodyType.isError()) {
             error("Function '" + func->name + "' expects return type " + retType.toString() +
                   ", but body yields " + bodyType.toString());
         }
     }
-
     popScope();
     return retType;
 }
@@ -247,12 +228,10 @@ Type SemanticAnalyzer::resolveStmt(ast::Stmt* stmt) {
 Type SemanticAnalyzer::resolveLetStmt(ast::LetStmt* stmt) {
     Type valType = resolveExpr(stmt->value.get());
     Type declType = stmt->type ? astTypeToSemantic(stmt->type.get()) : valType;
-
     if (stmt->type && declType != valType && !valType.isError()) {
         error("Type mismatch in let '" + stmt->name + "': expected " +
               declType.toString() + ", got " + valType.toString());
     }
-
     Symbol sym{stmt->name, declType, SymbolKind::Variable, stmt->isMut, true, 0, 0};
     if (!currentScope_->declare(sym)) {
         error("Variable '" + stmt->name + "' already declared in this scope");
@@ -263,12 +242,10 @@ Type SemanticAnalyzer::resolveLetStmt(ast::LetStmt* stmt) {
 Type SemanticAnalyzer::resolveConstStmt(ast::ConstStmt* stmt) {
     Type valType = resolveExpr(stmt->value.get());
     Type declType = stmt->type ? astTypeToSemantic(stmt->type.get()) : valType;
-
     if (stmt->type && declType != valType && !valType.isError()) {
         error("Type mismatch in const '" + stmt->name + "': expected " +
               declType.toString() + ", got " + valType.toString());
     }
-
     Symbol sym{stmt->name, declType, SymbolKind::Constant, false, true, 0, 0};
     if (!currentScope_->declare(sym)) {
         error("Constant '" + stmt->name + "' already declared in this scope");
@@ -288,8 +265,7 @@ Type SemanticAnalyzer::resolveIfStmt(ast::IfStmt* stmt) {
     Type thenType = resolveBlock(stmt->thenBranch.get());
     if (stmt->elseBranch) {
         if (auto* elseBlock = dynamic_cast<ast::BlockExpr*>(stmt->elseBranch.get())) {
-            Type elseType = resolveBlock(elseBlock);
-            // Statement-level if doesn't need matching types
+            resolveBlock(elseBlock);
         } else if (auto* elseIf = dynamic_cast<ast::IfStmt*>(stmt->elseBranch.get())) {
             resolveIfStmt(elseIf);
         }
@@ -314,9 +290,8 @@ Type SemanticAnalyzer::resolveForStmt(ast::ForStmt* stmt) {
     if (!iterType.isIterable() && !iterType.isError()) {
         error("For loop requires iterable type, got " + iterType.toString());
     }
-
     pushScope();
-    Type elemType = Type::Int(); // default; should derive from array type
+    Type elemType = Type::Int();
     if (iterType.kind == TypeKind::Array && iterType.elementType) {
         elemType = *iterType.elementType;
     } else if (iterType.kind == TypeKind::String) {
@@ -324,7 +299,6 @@ Type SemanticAnalyzer::resolveForStmt(ast::ForStmt* stmt) {
     }
     Symbol sym{stmt->varName, elemType, SymbolKind::Variable, false, true, 0, 0};
     currentScope_->declare(sym);
-
     bool oldInLoop = inLoop_;
     inLoop_ = true;
     resolveBlock(stmt->body.get());
@@ -386,7 +360,7 @@ Type SemanticAnalyzer::resolveLiteral(ast::LiteralExpr* lit) {
         case ast::LiteralExpr::Kind::Float: return Type::Float();
         case ast::LiteralExpr::Kind::String: return Type::String();
         case ast::LiteralExpr::Kind::Bool: return Type::Bool();
-        case ast::LiteralExpr::Kind::Nil: return Type::Void(); // or special nil type
+        case ast::LiteralExpr::Kind::Nil: return Type::Void();
     }
     return Type::Error();
 }
@@ -403,7 +377,6 @@ Type SemanticAnalyzer::resolveIdentifier(ast::IdentifierExpr* ident) {
 Type SemanticAnalyzer::resolveBinary(ast::BinaryExpr* bin) {
     Type left = resolveExpr(bin->left.get());
     Type right = resolveExpr(bin->right.get());
-
     if (left.isError() || right.isError()) return Type::Error();
 
     switch (bin->op) {
@@ -454,7 +427,6 @@ Type SemanticAnalyzer::resolveBinary(ast::BinaryExpr* bin) {
             return Type::Error();
 
         case ast::BinaryExpr::Op::Assign:
-            // Assignment handled in resolveAssign
             return right;
 
         case ast::BinaryExpr::Op::Range:
@@ -506,6 +478,7 @@ Type SemanticAnalyzer::resolveCall(ast::CallExpr* call) {
 
     for (size_t i = 0; i < call->args.size(); ++i) {
         Type argType = resolveExpr(call->args[i].get());
+        if (calleeType.paramTypes[i].kind == TypeKind::Unknown) continue;
         if (argType != calleeType.paramTypes[i] && !argType.isError()) {
             error("Argument " + std::to_string(i + 1) + " type mismatch: expected " +
                   calleeType.paramTypes[i].toString() + ", got " + argType.toString());
@@ -518,7 +491,6 @@ Type SemanticAnalyzer::resolveCall(ast::CallExpr* call) {
 Type SemanticAnalyzer::resolveField(ast::FieldExpr* field) {
     Type objType = resolveExpr(field->object.get());
     if (objType.isError()) return Type::Error();
-    // For now, only strings have .length
     if (objType == Type::String() && field->field == "length") {
         return Type::Int();
     }
@@ -557,7 +529,6 @@ Type SemanticAnalyzer::resolveIf(ast::IfExpr* ifExpr) {
 
     Type thenType = resolveBlock(ifExpr->thenBranch.get());
     if (!ifExpr->elseBranch) {
-        // If no else, expression type is void (or then type if it's a statement context)
         return Type::Void();
     }
 
@@ -576,7 +547,6 @@ Type SemanticAnalyzer::resolveMatch(ast::MatchExpr* match) {
 
     for (auto& arm : match->arms) {
         Type patType = resolvePattern(arm.pattern.get());
-        // Pattern should match scrutinee type
         if (patType != scrutType && !patType.isError() && !scrutType.isError() &&
             !(patType.isNumeric() && scrutType.isNumeric())) {
             error("Pattern type " + patType.toString() + " doesn't match scrutinee " + scrutType.toString());
@@ -626,7 +596,6 @@ Type SemanticAnalyzer::resolveAssign(ast::AssignExpr* assign) {
 
     if (targetType.isError() || valueType.isError()) return Type::Error();
 
-    // Check mutability for identifier targets
     if (auto* ident = dynamic_cast<ast::IdentifierExpr*>(assign->target.get())) {
         Symbol* sym = currentScope_->lookup(ident->name);
         if (sym && !sym->isMut && sym->kind != SymbolKind::Variable) {
@@ -647,8 +616,8 @@ Type SemanticAnalyzer::resolvePattern(ast::Pattern* pat) {
         return resolveLiteral(lit->literal.get());
     }
     if (auto* ident = dynamic_cast<ast::IdentifierPattern*>(pat)) {
-        // Bind variable in match arm scope
-        return Type::Unknown(); // will be inferred from scrutinee
+        (void)ident;
+        return Type::Unknown();
     }
     if (dynamic_cast<ast::WildcardPattern*>(pat)) {
         return Type::Unknown();
