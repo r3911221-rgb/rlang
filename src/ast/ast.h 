@@ -13,17 +13,11 @@ struct Pattern;
 struct Type;
 struct Item;
 
-// ------------------------------------------------------------------
-// Base
-// ------------------------------------------------------------------
 struct Node {
     virtual ~Node();
     virtual void print(std::ostream& os, int indent = 0) const = 0;
 };
 
-// ------------------------------------------------------------------
-// Types
-// ------------------------------------------------------------------
 struct Type : Node {
     virtual ~Type();
 };
@@ -34,9 +28,6 @@ struct SimpleType : Type {
     void print(std::ostream& os, int indent) const override;
 };
 
-// ------------------------------------------------------------------
-// Expressions
-// ------------------------------------------------------------------
 struct Expr : Node {
     virtual ~Expr();
 };
@@ -46,6 +37,11 @@ struct LiteralExpr : Expr {
     Kind kind;
     std::string value;
     LiteralExpr(Kind k, std::string v);
+    void print(std::ostream& os, int indent) const override;
+};
+
+struct StringInterpolationExpr : Expr {
+    std::vector<std::unique_ptr<Expr>> parts;
     void print(std::ostream& os, int indent) const override;
 };
 
@@ -144,9 +140,6 @@ struct AssignExpr : Expr {
     void print(std::ostream& os, int indent) const override;
 };
 
-// ------------------------------------------------------------------
-// Patterns
-// ------------------------------------------------------------------
 struct Pattern : Node {
     virtual ~Pattern();
 };
@@ -167,9 +160,6 @@ struct WildcardPattern : Pattern {
     void print(std::ostream& os, int indent) const override;
 };
 
-// ------------------------------------------------------------------
-// Statements
-// ------------------------------------------------------------------
 struct Stmt : Node {
     virtual ~Stmt();
 };
@@ -234,9 +224,6 @@ struct ContinueStmt : Stmt {
     void print(std::ostream& os, int indent) const override;
 };
 
-// ------------------------------------------------------------------
-// Items (top-level declarations)
-// ------------------------------------------------------------------
 struct Item : Node {
     virtual ~Item();
 };
