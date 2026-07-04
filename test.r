@@ -1,20 +1,23 @@
-fn main() {
-    let name := "R Language"
-    let version := 0.1
-    
-    if version > 0 {
-        println("Hello, #{name}!")
-    }
-    
-    match version {
-        0 => "zero",
-        0.1 => "point one",
-        _ => "other"
-    }
-    
-    for i in 0..10 {
-        println(i)
-    }
-    
-    return 0
-}
+def main()
+  let name = "R Language"
+  let version = 0.1
+  
+  if version > 0
+    puts("Hello, " + name + "!")
+  end
+  
+  case version
+  when 0
+    "zero"
+  when 0.1
+    "point one"
+  else
+    "other"
+  end
+  
+  for i in 0..10
+    puts(i)
+  end
+  
+  return 0
+end
