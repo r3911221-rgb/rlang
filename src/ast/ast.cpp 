@@ -6,7 +6,6 @@ static void ind(std::ostream& os, int level) {
     for (int i = 0; i < level; ++i) os << "  ";
 }
 
-// --- Destructors ---
 Node::~Node() = default;
 Type::~Type() = default;
 Expr::~Expr() = default;
@@ -22,13 +21,11 @@ WhileStmt::~WhileStmt() = default;
 ForStmt::~ForStmt() = default;
 FunctionItem::~FunctionItem() = default;
 
-// --- Types ---
 SimpleType::SimpleType(std::string n) : name(std::move(n)) {}
 void SimpleType::print(std::ostream& os, int indent) const {
     ind(os, indent); os << "Type(" << name << ")\n";
 }
 
-// --- Expressions ---
 LiteralExpr::LiteralExpr(Kind k, std::string v) : kind(k), value(std::move(v)) {}
 void LiteralExpr::print(std::ostream& os, int indent) const {
     ind(os, indent);
@@ -38,6 +35,13 @@ void LiteralExpr::print(std::ostream& os, int indent) const {
         case Kind::String: os << "String(\"" << value << "\")\n"; break;
         case Kind::Bool: os << "Bool(" << value << ")\n"; break;
         case Kind::Nil: os << "Nil\n"; break;
+    }
+}
+
+void StringInterpolationExpr::print(std::ostream& os, int indent) const {
+    ind(os, indent); os << "StringInterpolation\n";
+    for (const auto& part : parts) {
+        part->print(os, indent + 1);
     }
 }
 
@@ -173,7 +177,6 @@ void AssignExpr::print(std::ostream& os, int indent) const {
     value->print(os, indent + 1);
 }
 
-// --- Patterns ---
 LiteralPattern::LiteralPattern(std::unique_ptr<LiteralExpr> l) : literal(std::move(l)) {}
 void LiteralPattern::print(std::ostream& os, int indent) const {
     ind(os, indent); os << "PatLiteral\n";
@@ -189,7 +192,6 @@ void WildcardPattern::print(std::ostream& os, int indent) const {
     ind(os, indent); os << "PatWildcard\n";
 }
 
-// --- Statements ---
 LetStmt::LetStmt(bool m, std::string n, std::unique_ptr<Type> t, std::unique_ptr<Expr> v)
     : isMut(m), name(std::move(n)), type(std::move(t)), value(std::move(v)) {}
 void LetStmt::print(std::ostream& os, int indent) const {
@@ -262,7 +264,6 @@ void ContinueStmt::print(std::ostream& os, int indent) const {
     ind(os, indent); os << "Continue\n";
 }
 
-// --- Items ---
 void FunctionItem::print(std::ostream& os, int indent) const {
     ind(os, indent); os << "Function(" << name << ")\n";
     if (!params.empty()) {
@@ -301,7 +302,6 @@ void ConstItem::print(std::ostream& os, int indent) const {
     value->print(os, indent + 2);
 }
 
-// --- Program ---
 void Program::print(std::ostream& os, int indent) const {
     ind(os, indent); os << "Program\n";
     for (const auto& item : items) {
