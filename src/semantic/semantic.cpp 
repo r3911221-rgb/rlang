@@ -89,8 +89,8 @@ std::vector<SemanticError> SemanticAnalyzer::analyze(ast::Program* program) {
     errors_.clear();
     pushScope();
 
-    Symbol printlnSym{"println", Type::Function({Type::Unknown()}, Type::Void()), SymbolKind::Function, false, true, 0, 0};
-    currentScope_->declare(printlnSym);
+    Symbol putsSym{"puts", Type::Function({Type::Unknown()}, Type::Void()), SymbolKind::Function, false, true, 0, 0};
+    currentScope_->declare(putsSym);
     Symbol printSym{"print", Type::Function({Type::Unknown()}, Type::Void()), SymbolKind::Function, false, true, 0, 0};
     currentScope_->declare(printSym);
 
