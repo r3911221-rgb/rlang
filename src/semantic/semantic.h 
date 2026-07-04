@@ -1,0 +1,162 @@
+#ifndef R_SEMANTIC_H
+#define R_SEMANTIC_H
+
+#include "ast/ast.h"
+#include <string>
+#include <vector>
+#include <unordered_map>
+#include <memory>
+#include <optional>
+
+namespace r::semantic {
+
+// ------------------------------------------------------------------
+// Types
+// ------------------------------------------------------------------
+enum class TypeKind {
+    Unknown,
+    Void,
+    Never,
+    Int,
+    Float,
+    Bool,
+    String,
+    Char,
+    Array,
+    Function,
+    Error
+};
+
+struct Type {
+    TypeKind kind;
+    std::shared_ptr<Type> elementType; // for Array
+    std::vector<Type> paramTypes;      // for Function
+    Type returnType;                   // for Function
+
+    Type() : kind(TypeKind::Unknown) {}
+    explicit Type(TypeKind k) : kind(k) {}
+
+    static Type Void() { return Type(TypeKind::Void); }
+    static Type Never() { return Type(TypeKind::Never); }
+    static Type Int() { return Type(TypeKind::Int); }
+    static Type Float() { return Type(TypeKind::Float); }
+    static Type Bool() { return Type(TypeKind::Bool); }
+    static Type String() { return Type(TypeKind::String); }
+    static Type Char() { return Type(TypeKind::Char); }
+    static Type Error() { return Type(TypeKind::Error); }
+    static Type Array(const Type& elem);
+
+    bool isNumeric() const;
+    bool isComparable() const;
+    bool isIterable() const;
+    bool isError() const;
+    bool operator==(const Type& other) const;
+    bool operator!=(const Type& other) const;
+
+    std::string toString() const;
+};
+
+// ------------------------------------------------------------------
+// Symbols
+// ------------------------------------------------------------------
+enum class SymbolKind {
+    Variable,
+    Constant,
+    Function,
+    Parameter
+};
+
+struct Symbol {
+    std::string name;
+    Type type;
+    SymbolKind kind;
+    bool isMut;
+    bool isInitialized;
+    uint32_t line;
+    uint32_t column;
+};
+
+// ------------------------------------------------------------------
+// Scope
+// ------------------------------------------------------------------
+class Scope {
+public:
+    explicit Scope(Scope* parent = nullptr);
+    bool declare(const Symbol& sym);
+    Symbol* lookup(const std::string& name);
+    Symbol* lookupLocal(const std::string& name);
+
+private:
+    Scope* parent_;
+    std::unordered_map<std::string, Symbol> symbols_;
+};
+
+// ------------------------------------------------------------------
+// Semantic Analyzer
+// ------------------------------------------------------------------
+struct SemanticError {
+    std::string message;
+    uint32_t line;
+    uint32_t column;
+};
+
+class SemanticAnalyzer {
+public:
+    SemanticAnalyzer();
+    std::vector<SemanticError> analyze(ast::Program* program);
+
+    bool hasErrors() const { return !errors_.empty(); }
+    const std::vector<SemanticError>& errors() const { return errors_; }
+
+private:
+    Scope* currentScope_;
+    std::vector<std::unique_ptr<Scope>> scopes_;
+    std::vector<SemanticError> errors_;
+    Type currentFunctionReturnType_;
+    bool inLoop_;
+    bool hasReturn_;
+
+    void pushScope();
+    void popScope();
+
+    void error(const std::string& msg, uint32_t line, uint32_t col);
+    void error(const std::string& msg);
+
+    Type resolveItem(ast::Item* item);
+    Type resolveFunction(ast::FunctionItem* func);
+    Type resolveLetItem(ast::LetItem* item);
+    Type resolveConstItem(ast::ConstItem* item);
+
+    Type resolveStmt(ast::Stmt* stmt);
+    Type resolveLetStmt(ast::LetStmt* stmt);
+    Type resolveConstStmt(ast::ConstStmt* stmt);
+    Type resolveExprStmt(ast::ExprStmt* stmt);
+    Type resolveIfStmt(ast::IfStmt* stmt);
+    Type resolveWhileStmt(ast::WhileStmt* stmt);
+    Type resolveForStmt(ast::ForStmt* stmt);
+    Type resolveReturnStmt(ast::ReturnStmt* stmt);
+    Type resolveBreakStmt(ast::BreakStmt* stmt);
+    Type resolveContinueStmt(ast::ContinueStmt* stmt);
+
+    Type resolveExpr(ast::Expr* expr);
+    Type resolveLiteral(ast::LiteralExpr* lit);
+    Type resolveIdentifier(ast::IdentifierExpr* ident);
+    Type resolveBinary(ast::BinaryExpr* bin);
+    Type resolveUnary(ast::UnaryExpr* unary);
+    Type resolveCall(ast::CallExpr* call);
+    Type resolveField(ast::FieldExpr* field);
+    Type resolveIndex(ast::IndexExpr* index);
+    Type resolveBlock(ast::BlockExpr* block);
+    Type resolveIf(ast::IfExpr* ifExpr);
+    Type resolveMatch(ast::MatchExpr* match);
+    Type resolveArray(ast::ArrayExpr* arr);
+    Type resolveRange(ast::RangeExpr* range);
+    Type resolveAssign(ast::AssignExpr* assign);
+
+    Type resolvePattern(ast::Pattern* pat);
+    Type astTypeToSemantic(ast::Type* type);
+};
+
+} // namespace r::semantic
+
+#endif // R_SEMANTIC_H
