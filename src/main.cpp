@@ -4,20 +4,16 @@
 #include "semantic/semantic.h"
 #include "bytecode/compiler.h"
 #include "bytecode/vm.h"
+#include "repl/repl.h"
 #include <iostream>
 #include <fstream>
 #include <sstream>
 
-int main(int argc, char* argv[]) {
-    if (argc < 2) {
-        std::cerr << "Usage: " << argv[0] << " <file.r>" << std::endl;
-        return 1;
-    }
-
-    std::ifstream file(argv[1]);
+void runFile(const char* path) {
+    std::ifstream file(path);
     if (!file) {
-        std::cerr << "Error: Cannot open file: " << argv[1] << std::endl;
-        return 1;
+        std::cerr << "Error: Cannot open file: " << path << std::endl;
+        exit(1);
     }
 
     std::stringstream buffer;
@@ -25,7 +21,7 @@ int main(int argc, char* argv[]) {
     std::string source = buffer.str();
 
     r::Lexer lexer(source);
-    std::vector<r::Token> tokens = lexer.tokenize();
+    auto tokens = lexer.tokenize();
 
     r::Parser parser(std::move(tokens));
     auto program = parser.parse();
@@ -37,7 +33,7 @@ int main(int argc, char* argv[]) {
         for (const auto& e : errors) {
             std::cerr << "  [Line " << e.line << "] " << e.message << "\n";
         }
-        return 1;
+        exit(1);
     }
 
     r::vm::Chunk chunk;
@@ -46,6 +42,17 @@ int main(int argc, char* argv[]) {
 
     r::vm::VM vm;
     vm.execute(&chunk);
+}
 
+int main(int argc, char* argv[]) {
+    if (argc == 1) {
+        r::REPL repl;
+        repl.run();
+    } else if (argc == 2) {
+        runFile(argv[1]);
+    } else {
+        std::cerr << "Usage: " << argv[0] << " [file.r]" << std::endl;
+        return 1;
+    }
     return 0;
 }
