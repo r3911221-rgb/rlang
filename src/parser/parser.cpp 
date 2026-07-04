@@ -60,14 +60,11 @@ bool Parser::canStartExpr() const {
            check(TokenType::NIL_LITERAL) || check(TokenType::IDENTIFIER) ||
            check(TokenType::LPAREN) || check(TokenType::LBRACE) ||
            check(TokenType::LBRACKET) || check(TokenType::IF) ||
-           check(TokenType::MATCH) || check(TokenType::MINUS) ||
+           check(TokenType::CASE) || check(TokenType::MINUS) ||
            check(TokenType::BANG) || check(TokenType::NOT) ||
            check(TokenType::BIT_NOT);
 }
 
-// ------------------------------------------------------------------
-// Program & Items
-// ------------------------------------------------------------------
 std::unique_ptr<ast::Program> Parser::parse() {
     return parseProgram();
 }
@@ -81,10 +78,10 @@ std::unique_ptr<ast::Program> Parser::parseProgram() {
 }
 
 std::unique_ptr<ast::Item> Parser::parseItem() {
-    if (match(TokenType::FN)) return parseFunction();
+    if (match(TokenType::DEF)) return parseFunction();
     if (match(TokenType::LET)) return parseLetItem();
     if (match(TokenType::CONST)) return parseConstItem();
-    error("Expected declaration (fn, let, const)");
+    error("Expected declaration (def, let, const)");
     return nullptr;
 }
 
@@ -108,7 +105,9 @@ std::unique_ptr<ast::FunctionItem> Parser::parseFunction() {
         returnType = parseType();
     }
 
-    auto body = parseBlock();
+    auto body = parseBody();
+    consume(TokenType::END, "Expected 'end' after function body");
+
     auto func = std::make_unique<ast::FunctionItem>();
     func->name = name;
     func->params = std::move(params);
@@ -123,13 +122,11 @@ std::unique_ptr<ast::LetItem> Parser::parseLetItem() {
 
     std::unique_ptr<ast::Type> type = nullptr;
     if (check(TokenType::COLON) && peek(1).type != TokenType::ASSIGN) {
-        advance(); // consume ':'
+        advance();
         type = parseType();
     }
 
-    if (!match(TokenType::WALRUS) && !match(TokenType::ASSIGN)) {
-        error("Expected ':=' or '=' after variable declaration");
-    }
+    consume(TokenType::ASSIGN, "Expected '=' after variable declaration");
     auto value = parseExpr();
 
     auto item = std::make_unique<ast::LetItem>();
@@ -149,9 +146,7 @@ std::unique_ptr<ast::ConstItem> Parser::parseConstItem() {
         type = parseType();
     }
 
-    if (!match(TokenType::WALRUS) && !match(TokenType::ASSIGN)) {
-        error("Expected ':=' or '=' after constant declaration");
-    }
+    consume(TokenType::ASSIGN, "Expected '=' after constant declaration");
     auto value = parseExpr();
 
     auto item = std::make_unique<ast::ConstItem>();
@@ -161,32 +156,42 @@ std::unique_ptr<ast::ConstItem> Parser::parseConstItem() {
     return item;
 }
 
-// ------------------------------------------------------------------
-// Block & Statements
-// ------------------------------------------------------------------
-std::unique_ptr<ast::BlockExpr> Parser::parseBlock() {
-    consume(TokenType::LBRACE, "Expected '{'");
+std::unique_ptr<ast::BlockExpr> Parser::parseBody() {
     auto block = std::make_unique<ast::BlockExpr>();
-    while (!check(TokenType::RBRACE) && !isAtEnd()) {
+    while (!check(TokenType::END) && !check(TokenType::ELSIF) &&
+           !check(TokenType::ELSE) && !check(TokenType::WHEN) && !isAtEnd()) {
         block->stmts.push_back(parseStmt());
     }
-    consume(TokenType::RBRACE, "Expected '}'");
+    return block;
+}
+
+std::unique_ptr<ast::Expr> Parser::parseArmBody() {
+    if (match(TokenType::THEN)) {
+        return parseExpr();
+    }
+    auto block = std::make_unique<ast::BlockExpr>();
+    while (!check(TokenType::WHEN) && !check(TokenType::ELSE) &&
+           !check(TokenType::END) && !isAtEnd()) {
+        block->stmts.push_back(parseStmt());
+    }
     return block;
 }
 
 std::unique_ptr<ast::Stmt> Parser::parseStmt() {
     if (check(TokenType::LET)) return parseLetStmt();
     if (check(TokenType::CONST)) return parseConstStmt();
+    if (check(TokenType::IF)) return std::make_unique<ast::ExprStmt>(parseIfExpr());
+    if (check(TokenType::CASE)) return std::make_unique<ast::ExprStmt>(parseMatchExpr());
     if (check(TokenType::WHILE)) return parseWhileStmt();
     if (check(TokenType::FOR)) return parseForStmt();
     if (check(TokenType::RETURN)) return parseReturnStmt();
-    if (check(TokenType::BREAK)) { advance(); match(TokenType::SEMICOLON); return std::make_unique<ast::BreakStmt>(); }
-    if (check(TokenType::CONTINUE)) { advance(); match(TokenType::SEMICOLON); return std::make_unique<ast::ContinueStmt>(); }
+    if (check(TokenType::BREAK)) return parseBreakStmt();
+    if (check(TokenType::CONTINUE)) return parseContinueStmt();
     return parseExprStmt();
 }
 
 std::unique_ptr<ast::LetStmt> Parser::parseLetStmt() {
-    advance(); // consume 'let'
+    advance();
     bool isMut = match(TokenType::MUT);
     auto name = consume(TokenType::IDENTIFIER, "Expected variable name").text;
 
@@ -196,17 +201,15 @@ std::unique_ptr<ast::LetStmt> Parser::parseLetStmt() {
         type = parseType();
     }
 
-    if (!match(TokenType::WALRUS) && !match(TokenType::ASSIGN)) {
-        error("Expected ':=' or '=' after variable declaration");
-    }
+    consume(TokenType::ASSIGN, "Expected '=' after variable declaration");
     auto value = parseExpr();
-    match(TokenType::SEMICOLON); // optional
+    match(TokenType::SEMICOLON);
 
     return std::make_unique<ast::LetStmt>(isMut, name, std::move(type), std::move(value));
 }
 
 std::unique_ptr<ast::ConstStmt> Parser::parseConstStmt() {
-    advance(); // consume 'const'
+    advance();
     auto name = consume(TokenType::IDENTIFIER, "Expected constant name").text;
 
     std::unique_ptr<ast::Type> type = nullptr;
@@ -215,19 +218,18 @@ std::unique_ptr<ast::ConstStmt> Parser::parseConstStmt() {
         type = parseType();
     }
 
-    if (!match(TokenType::WALRUS) && !match(TokenType::ASSIGN)) {
-        error("Expected ':=' or '=' after constant declaration");
-    }
+    consume(TokenType::ASSIGN, "Expected '=' after constant declaration");
     auto value = parseExpr();
-    match(TokenType::SEMICOLON); // optional
+    match(TokenType::SEMICOLON);
 
     return std::make_unique<ast::ConstStmt>(name, std::move(type), std::move(value));
 }
 
 std::unique_ptr<ast::WhileStmt> Parser::parseWhileStmt() {
-    advance(); // consume 'while'
+    advance();
     auto condition = parseExpr();
-    auto body = parseBlock();
+    auto body = parseBody();
+    consume(TokenType::END, "Expected 'end' after while");
     auto stmt = std::make_unique<ast::WhileStmt>();
     stmt->condition = std::move(condition);
     stmt->body = std::move(body);
@@ -235,11 +237,12 @@ std::unique_ptr<ast::WhileStmt> Parser::parseWhileStmt() {
 }
 
 std::unique_ptr<ast::ForStmt> Parser::parseForStmt() {
-    advance(); // consume 'for'
+    advance();
     auto varName = consume(TokenType::IDENTIFIER, "Expected variable name after 'for'").text;
     consume(TokenType::IN, "Expected 'in' after variable name");
     auto iterable = parseExpr();
-    auto body = parseBlock();
+    auto body = parseBody();
+    consume(TokenType::END, "Expected 'end' after for");
     auto stmt = std::make_unique<ast::ForStmt>();
     stmt->varName = varName;
     stmt->iterable = std::move(iterable);
@@ -248,42 +251,48 @@ std::unique_ptr<ast::ForStmt> Parser::parseForStmt() {
 }
 
 std::unique_ptr<ast::ReturnStmt> Parser::parseReturnStmt() {
-    advance(); // consume 'return'
+    advance();
     std::unique_ptr<ast::Expr> value = nullptr;
     if (canStartExpr()) {
         value = parseExpr();
     }
-    match(TokenType::SEMICOLON); // optional
+    match(TokenType::SEMICOLON);
     return std::make_unique<ast::ReturnStmt>(std::move(value));
+}
+
+std::unique_ptr<ast::BreakStmt> Parser::parseBreakStmt() {
+    advance();
+    match(TokenType::SEMICOLON);
+    return std::make_unique<ast::BreakStmt>();
+}
+
+std::unique_ptr<ast::ContinueStmt> Parser::parseContinueStmt() {
+    advance();
+    match(TokenType::SEMICOLON);
+    return std::make_unique<ast::ContinueStmt>();
 }
 
 std::unique_ptr<ast::ExprStmt> Parser::parseExprStmt() {
     auto expr = parseExpr();
-    match(TokenType::SEMICOLON); // optional
+    match(TokenType::SEMICOLON);
     return std::make_unique<ast::ExprStmt>(std::move(expr));
 }
 
-// ------------------------------------------------------------------
-// Expressions (precedence climbing)
-// ------------------------------------------------------------------
 std::unique_ptr<ast::Expr> Parser::parseExpr() {
     return parseAssignment();
 }
 
 std::unique_ptr<ast::Expr> Parser::parseAssignment() {
     auto expr = parseRange();
-
-    if (match(TokenType::ASSIGN) || match(TokenType::WALRUS)) {
+    if (match(TokenType::ASSIGN)) {
         auto value = parseAssignment();
         return std::make_unique<ast::AssignExpr>(std::move(expr), std::move(value));
     }
-
     return expr;
 }
 
 std::unique_ptr<ast::Expr> Parser::parseRange() {
     auto left = parseOr();
-
     if (match(TokenType::DOT_DOT)) {
         auto right = parseOr();
         return std::make_unique<ast::RangeExpr>(std::move(left), std::move(right), false);
@@ -292,7 +301,6 @@ std::unique_ptr<ast::Expr> Parser::parseRange() {
         auto right = parseOr();
         return std::make_unique<ast::RangeExpr>(std::move(left), std::move(right), true);
     }
-
     return left;
 }
 
@@ -496,12 +504,12 @@ std::unique_ptr<ast::Expr> Parser::parsePrimary() {
         return std::make_unique<ast::IdentifierExpr>(previous().text);
     }
     if (check(TokenType::LBRACE)) {
-        return parseBlock();
+        return parseBody();
     }
     if (match(TokenType::IF)) {
         return parseIfExpr();
     }
-    if (match(TokenType::MATCH)) {
+    if (match(TokenType::CASE)) {
         return parseMatchExpr();
     }
     if (match(TokenType::LPAREN)) {
@@ -519,17 +527,16 @@ std::unique_ptr<ast::Expr> Parser::parsePrimary() {
 
 std::unique_ptr<ast::IfExpr> Parser::parseIfExpr() {
     auto condition = parseExpr();
-    auto thenBranch = parseBlock();
+    auto thenBranch = parseBody();
 
     std::unique_ptr<ast::Expr> elseBranch = nullptr;
-    if (match(TokenType::ELSE)) {
-        if (check(TokenType::IF)) {
-            advance(); // consume 'if'
-            elseBranch = parseIfExpr();
-        } else {
-            elseBranch = parseBlock();
-        }
+    if (match(TokenType::ELSIF)) {
+        elseBranch = parseIfExpr();
+    } else if (match(TokenType::ELSE)) {
+        elseBranch = parseBody();
     }
+
+    consume(TokenType::END, "Expected 'end' after if");
 
     auto expr = std::make_unique<ast::IfExpr>();
     expr->condition = std::move(condition);
@@ -540,18 +547,21 @@ std::unique_ptr<ast::IfExpr> Parser::parseIfExpr() {
 
 std::unique_ptr<ast::MatchExpr> Parser::parseMatchExpr() {
     auto scrutinee = parseExpr();
-    consume(TokenType::LBRACE, "Expected '{' after match expression");
-
     std::vector<ast::MatchExpr::Arm> arms;
-    while (!check(TokenType::RBRACE) && !isAtEnd()) {
+
+    while (match(TokenType::WHEN)) {
         auto pattern = parsePattern();
-        consume(TokenType::FAT_ARROW, "Expected '=>' after pattern");
-        auto expr = parseExpr();
+        auto expr = parseArmBody();
         arms.push_back({std::move(pattern), std::move(expr)});
-        match(TokenType::COMMA); // optional trailing comma
     }
 
-    consume(TokenType::RBRACE, "Expected '}' after match arms");
+    if (match(TokenType::ELSE)) {
+        auto wildcard = std::make_unique<ast::WildcardPattern>();
+        auto expr = parseArmBody();
+        arms.push_back({std::move(wildcard), std::move(expr)});
+    }
+
+    consume(TokenType::END, "Expected 'end' after case");
 
     auto matchExpr = std::make_unique<ast::MatchExpr>();
     matchExpr->scrutinee = std::move(scrutinee);
@@ -572,9 +582,6 @@ std::unique_ptr<ast::ArrayExpr> Parser::parseArrayExpr() {
     return arr;
 }
 
-// ------------------------------------------------------------------
-// Patterns
-// ------------------------------------------------------------------
 std::unique_ptr<ast::Pattern> Parser::parsePattern() {
     if (match(TokenType::INT_LITERAL)) {
         auto lit = std::make_unique<ast::LiteralExpr>(ast::LiteralExpr::Kind::Int, previous().text);
@@ -618,9 +625,6 @@ std::unique_ptr<ast::Pattern> Parser::parsePattern() {
     return nullptr;
 }
 
-// ------------------------------------------------------------------
-// Types
-// ------------------------------------------------------------------
 std::unique_ptr<ast::Type> Parser::parseType() {
     auto name = consume(TokenType::IDENTIFIER, "Expected type name").text;
     return std::make_unique<ast::SimpleType>(name);
