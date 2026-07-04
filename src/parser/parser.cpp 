@@ -494,6 +494,9 @@ std::unique_ptr<ast::Expr> Parser::parsePrimary() {
     if (match(TokenType::STRING_LITERAL)) {
         return std::make_unique<ast::LiteralExpr>(ast::LiteralExpr::Kind::String, previous().text);
     }
+    if (check(TokenType::STRING_LITERAL) && peek(1).type == TokenType::HASH) {
+        return parseStringInterpolation();
+    }
     if (match(TokenType::BOOL_LITERAL)) {
         return std::make_unique<ast::LiteralExpr>(ast::LiteralExpr::Kind::Bool, previous().text);
     }
@@ -523,6 +526,24 @@ std::unique_ptr<ast::Expr> Parser::parsePrimary() {
 
     error("Unexpected token in expression");
     return nullptr;
+}
+
+std::unique_ptr<ast::Expr> Parser::parseStringInterpolation() {
+    auto interpolation = std::make_unique<ast::StringInterpolationExpr>();
+
+    while (check(TokenType::STRING_LITERAL) || check(TokenType::HASH)) {
+        if (match(TokenType::STRING_LITERAL)) {
+            interpolation->parts.push_back(
+                std::make_unique<ast::LiteralExpr>(ast::LiteralExpr::Kind::String, previous().text));
+        }
+        if (match(TokenType::HASH)) {
+            consume(TokenType::LBRACE, "Expected '{' after '#'");
+            interpolation->parts.push_back(parseExpr());
+            consume(TokenType::RBRACE, "Expected '}' after interpolation expression");
+        }
+    }
+
+    return interpolation;
 }
 
 std::unique_ptr<ast::IfExpr> Parser::parseIfExpr() {
