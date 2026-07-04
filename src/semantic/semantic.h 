@@ -10,28 +10,15 @@
 
 namespace r::semantic {
 
-// ------------------------------------------------------------------
-// Types
-// ------------------------------------------------------------------
 enum class TypeKind {
-    Unknown,
-    Void,
-    Never,
-    Int,
-    Float,
-    Bool,
-    String,
-    Char,
-    Array,
-    Function,
-    Error
+    Unknown, Void, Never, Int, Float, Bool, String, Char, Array, Function, Error
 };
 
 struct Type {
     TypeKind kind;
-    std::shared_ptr<Type> elementType; // for Array
-    std::vector<Type> paramTypes;      // for Function
-    Type returnType;                   // for Function
+    std::shared_ptr<Type> elementType;
+    std::vector<Type> paramTypes;
+    Type returnType;
 
     Type() : kind(TypeKind::Unknown) {}
     explicit Type(TypeKind k) : kind(k) {}
@@ -45,6 +32,7 @@ struct Type {
     static Type Char() { return Type(TypeKind::Char); }
     static Type Error() { return Type(TypeKind::Error); }
     static Type Array(const Type& elem);
+    static Type Function(const std::vector<Type>& params, const Type& ret);
 
     bool isNumeric() const;
     bool isComparable() const;
@@ -52,19 +40,10 @@ struct Type {
     bool isError() const;
     bool operator==(const Type& other) const;
     bool operator!=(const Type& other) const;
-
     std::string toString() const;
 };
 
-// ------------------------------------------------------------------
-// Symbols
-// ------------------------------------------------------------------
-enum class SymbolKind {
-    Variable,
-    Constant,
-    Function,
-    Parameter
-};
+enum class SymbolKind { Variable, Constant, Function, Parameter };
 
 struct Symbol {
     std::string name;
@@ -76,9 +55,6 @@ struct Symbol {
     uint32_t column;
 };
 
-// ------------------------------------------------------------------
-// Scope
-// ------------------------------------------------------------------
 class Scope {
 public:
     explicit Scope(Scope* parent = nullptr);
@@ -91,9 +67,6 @@ private:
     std::unordered_map<std::string, Symbol> symbols_;
 };
 
-// ------------------------------------------------------------------
-// Semantic Analyzer
-// ------------------------------------------------------------------
 struct SemanticError {
     std::string message;
     uint32_t line;
@@ -104,7 +77,6 @@ class SemanticAnalyzer {
 public:
     SemanticAnalyzer();
     std::vector<SemanticError> analyze(ast::Program* program);
-
     bool hasErrors() const { return !errors_.empty(); }
     const std::vector<SemanticError>& errors() const { return errors_; }
 
@@ -118,15 +90,12 @@ private:
 
     void pushScope();
     void popScope();
-
     void error(const std::string& msg, uint32_t line, uint32_t col);
     void error(const std::string& msg);
-
     Type resolveItem(ast::Item* item);
     Type resolveFunction(ast::FunctionItem* func);
     Type resolveLetItem(ast::LetItem* item);
     Type resolveConstItem(ast::ConstItem* item);
-
     Type resolveStmt(ast::Stmt* stmt);
     Type resolveLetStmt(ast::LetStmt* stmt);
     Type resolveConstStmt(ast::ConstStmt* stmt);
@@ -137,7 +106,6 @@ private:
     Type resolveReturnStmt(ast::ReturnStmt* stmt);
     Type resolveBreakStmt(ast::BreakStmt* stmt);
     Type resolveContinueStmt(ast::ContinueStmt* stmt);
-
     Type resolveExpr(ast::Expr* expr);
     Type resolveLiteral(ast::LiteralExpr* lit);
     Type resolveIdentifier(ast::IdentifierExpr* ident);
@@ -152,7 +120,6 @@ private:
     Type resolveArray(ast::ArrayExpr* arr);
     Type resolveRange(ast::RangeExpr* range);
     Type resolveAssign(ast::AssignExpr* assign);
-
     Type resolvePattern(ast::Pattern* pat);
     Type astTypeToSemantic(ast::Type* type);
 };
