@@ -2,6 +2,7 @@
 #define R_VM_H
 
 #include "bytecode/chunk.h"
+#include "gc/gc.h"
 #include <vector>
 #include <string>
 #include <unordered_map>
@@ -16,6 +17,7 @@ private:
     Chunk* chunk_ = nullptr;
     std::vector<Value> stack_;
     std::unordered_map<std::string, Value> globals_;
+    GC gc_;
     size_t ip_ = 0;
 
     void reset();
@@ -31,6 +33,7 @@ private:
     void runtimeError(const std::string& msg);
     void run();
     bool callValue(const Value& callee, uint8_t argCount);
+    void maybeGC();
 };
 
 } // namespace r::vm
