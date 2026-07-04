@@ -1,0 +1,75 @@
+#ifndef R_PARSER_H
+#define R_PARSER_H
+
+#include "lexer/lexer.h"
+#include "ast/ast.h"
+#include <memory>
+#include <vector>
+#include <stdexcept>
+
+namespace r {
+
+class Parser {
+public:
+    explicit Parser(std::vector<Token> tokens);
+    std::unique_ptr<ast::Program> parse();
+
+private:
+    std::vector<Token> tokens_;
+    size_t current_ = 0;
+
+    const Token& peek(size_t offset = 0) const;
+    const Token& previous() const;
+    bool isAtEnd() const;
+    Token advance();
+    bool check(TokenType type) const;
+    bool match(TokenType type);
+    bool match(std::initializer_list<TokenType> types);
+    Token consume(TokenType type, const std::string& msg);
+
+    void error(const std::string& msg);
+    bool canStartExpr() const;
+
+    std::unique_ptr<ast::Program> parseProgram();
+    std::unique_ptr<ast::Item> parseItem();
+    std::unique_ptr<ast::FunctionItem> parseFunction();
+    std::unique_ptr<ast::LetItem> parseLetItem();
+    std::unique_ptr<ast::ConstItem> parseConstItem();
+
+    std::unique_ptr<ast::BlockExpr> parseBlock();
+    std::unique_ptr<ast::Stmt> parseStmt();
+    std::unique_ptr<ast::LetStmt> parseLetStmt();
+    std::unique_ptr<ast::ConstStmt> parseConstStmt();
+    std::unique_ptr<ast::WhileStmt> parseWhileStmt();
+    std::unique_ptr<ast::ForStmt> parseForStmt();
+    std::unique_ptr<ast::ReturnStmt> parseReturnStmt();
+    std::unique_ptr<ast::ExprStmt> parseExprStmt();
+
+    std::unique_ptr<ast::Expr> parseExpr();
+    std::unique_ptr<ast::Expr> parseAssignment();
+    std::unique_ptr<ast::Expr> parseRange();
+    std::unique_ptr<ast::Expr> parseOr();
+    std::unique_ptr<ast::Expr> parseAnd();
+    std::unique_ptr<ast::Expr> parseEquality();
+    std::unique_ptr<ast::Expr> parseComparison();
+    std::unique_ptr<ast::Expr> parseBitwiseOr();
+    std::unique_ptr<ast::Expr> parseBitwiseXor();
+    std::unique_ptr<ast::Expr> parseBitwiseAnd();
+    std::unique_ptr<ast::Expr> parseShift();
+    std::unique_ptr<ast::Expr> parseAdditive();
+    std::unique_ptr<ast::Expr> parseMultiplicative();
+    std::unique_ptr<ast::Expr> parseUnary();
+    std::unique_ptr<ast::Expr> parsePostfix();
+    std::unique_ptr<ast::Expr> parsePrimary();
+
+    std::unique_ptr<ast::IfExpr> parseIfExpr();
+    std::unique_ptr<ast::MatchExpr> parseMatchExpr();
+    std::unique_ptr<ast::ArrayExpr> parseArrayExpr();
+
+    std::unique_ptr<ast::Pattern> parsePattern();
+    std::unique_ptr<ast::Type> parseType();
+};
+
+} // namespace r
+
+#endif // R_PARSER_H
