@@ -39,6 +39,7 @@ uint32_t VM::readLine() {
 
 void VM::push(const Value& value) {
     stack_.push_back(value);
+    maybeGC();
 }
 
 Value VM::pop() {
@@ -54,6 +55,12 @@ Value& VM::peek(size_t distance) {
 void VM::runtimeError(const std::string& msg) {
     std::cerr << "Runtime error: " << msg << "\n";
     throw std::runtime_error(msg);
+}
+
+void VM::maybeGC() {
+    if (gc_.bytesAllocated() > gc_.threshold()) {
+        gc_.collect(stack_, globals_);
+    }
 }
 
 bool VM::callValue(const Value& callee, uint8_t argCount) {
