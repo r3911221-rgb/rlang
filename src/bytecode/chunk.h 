@@ -1,0 +1,40 @@
+#ifndef R_CHUNK_H
+#define R_CHUNK_H
+
+#include "bytecode/value.h"
+#include <vector>
+#include <cstdint>
+
+namespace r::vm {
+
+enum class OpCode : uint8_t {
+    OP_NIL, OP_TRUE, OP_FALSE,
+    OP_CONST,
+    OP_ADD, OP_SUB, OP_MUL, OP_DIV, OP_MOD,
+    OP_EQ, OP_NEQ, OP_LT, OP_GT, OP_LEQ, OP_GEQ,
+    OP_AND, OP_OR,
+    OP_NOT, OP_NEG, OP_BIT_NOT,
+    OP_BIT_AND, OP_BIT_OR, OP_BIT_XOR, OP_SHL, OP_SHR,
+    OP_PRINT, OP_POP, OP_DUP,
+    OP_DEFINE_GLOBAL, OP_GET_GLOBAL, OP_SET_GLOBAL,
+    OP_GET_LOCAL, OP_SET_LOCAL,
+    OP_JUMP, OP_JUMP_IF_FALSE, OP_LOOP,
+    OP_CALL, OP_RETURN,
+    OP_ARRAY, OP_INDEX, OP_SET_INDEX,
+    OP_RANGE
+};
+
+struct Chunk {
+    std::vector<uint8_t> code;
+    std::vector<Value> constants;
+    std::vector<uint32_t> lines;
+
+    size_t addConstant(const Value& value);
+    void write(uint8_t byte, uint32_t line);
+    void write(OpCode op, uint32_t line);
+    size_t count() const { return code.size(); }
+};
+
+} // namespace r::vm
+
+#endif
