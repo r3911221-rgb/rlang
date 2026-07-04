@@ -1,0 +1,46 @@
+#ifndef R_VALUE_H
+#define R_VALUE_H
+
+#include <string>
+#include <vector>
+#include <iostream>
+
+namespace r::vm {
+
+enum class ValueType { Nil, Bool, Int, Float, String, Array };
+
+struct Value {
+    ValueType type;
+    union {
+        bool b;
+        int64_t i;
+        double f;
+    } as;
+    std::string s;
+    std::vector<Value> array;
+
+    Value() : type(ValueType::Nil), as{0} {}
+    static Value nil() { return Value(); }
+    static Value bool_(bool v) { Value val; val.type = ValueType::Bool; val.as.b = v; return val; }
+    static Value int_(int64_t v) { Value val; val.type = ValueType::Int; val.as.i = v; return val; }
+    static Value float_(double v) { Value val; val.type = ValueType::Float; val.as.f = v; return val; }
+    static Value string_(std::string v) { Value val; val.type = ValueType::String; val.s = std::move(v); return val; }
+    static Value array_(std::vector<Value> v) { Value val; val.type = ValueType::Array; val.array = std::move(v); return val; }
+
+    bool isNil() const { return type == ValueType::Nil; }
+    bool isBool() const { return type == ValueType::Bool; }
+    bool isInt() const { return type == ValueType::Int; }
+    bool isFloat() const { return type == ValueType::Float; }
+    bool isString() const { return type == ValueType::String; }
+    bool isArray() const { return type == ValueType::Array; }
+    bool isNumeric() const { return isInt() || isFloat(); }
+
+    double asNumber() const { return isInt() ? static_cast<double>(as.i) : as.f; }
+
+    std::string toString() const;
+    bool operator==(const Value& other) const;
+};
+
+} // namespace r::vm
+
+#endif
