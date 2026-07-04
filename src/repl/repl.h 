@@ -1,0 +1,25 @@
+#ifndef R_REPL_H
+#define R_REPL_H
+
+#include <string>
+
+namespace r {
+
+class REPL {
+public:
+    void run();
+
+private:
+    std::string buffer_;
+    int braceCount_ = 0;
+    int parenCount_ = 0;
+    int bracketCount_ = 0;
+
+    bool isComplete(const std::string& line);
+    void evaluate(const std::string& source);
+    void printBanner();
+};
+
+} // namespace r
+
+#endif // R_REPL_H
