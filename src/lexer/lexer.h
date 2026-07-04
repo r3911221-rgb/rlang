@@ -4,6 +4,7 @@
 #include <string>
 #include <vector>
 #include <cstdint>
+#include <unordered_map>
 
 namespace r {
 
@@ -43,6 +44,7 @@ enum class TokenType {
     ARROW, FAT_ARROW, COLON, COLON_COLON,
     DOT, DOT_DOT, DOT_DOT_DOT, DOT_DOT_EQ,
     QUESTION, BANG, AT, HASH, DOLLAR,
+    WALRUS, // :=
 
     // Delimiters
     LPAREN, RPAREN,
