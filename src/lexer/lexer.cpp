@@ -1,6 +1,5 @@
 #include "lexer.h"
 #include <cctype>
-#include <stdexcept>
 
 namespace r {
 
@@ -110,6 +109,7 @@ std::vector<Token> Lexer::tokenize() {
                 case ':':
                     advance();
                     if (match(':')) tokens.push_back(makeToken(TokenType::COLON_COLON, "::"));
+                    else if (match('=')) tokens.push_back(makeToken(TokenType::WALRUS, ":="));
                     else tokens.push_back(makeToken(TokenType::COLON, ":"));
                     break;
 
@@ -201,15 +201,18 @@ Token Lexer::readNumber() {
     uint32_t startLine = line_;
     uint32_t startCol = column_;
     std::string numStr;
-
     bool isFloat = false;
 
-    while (!isAtEnd() && (isDigit(peek()) || peek() == '.')) {
-        if (peek() == '.') {
-            if (isFloat) break;
-            isFloat = true;
-        }
+    while (!isAtEnd() && isDigit(peek())) {
         numStr += advance();
+    }
+
+    if (!isAtEnd() && peek() == '.' && isDigit(peek(1))) {
+        isFloat = true;
+        numStr += advance(); // consume '.'
+        while (!isAtEnd() && isDigit(peek())) {
+            numStr += advance();
+        }
     }
 
     TokenType type = isFloat ? TokenType::FLOAT_LITERAL : TokenType::INT_LITERAL;
