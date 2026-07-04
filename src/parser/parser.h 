@@ -36,13 +36,17 @@ private:
     std::unique_ptr<ast::LetItem> parseLetItem();
     std::unique_ptr<ast::ConstItem> parseConstItem();
 
-    std::unique_ptr<ast::BlockExpr> parseBlock();
+    std::unique_ptr<ast::BlockExpr> parseBody();
+    std::unique_ptr<ast::Expr> parseArmBody();
+
     std::unique_ptr<ast::Stmt> parseStmt();
     std::unique_ptr<ast::LetStmt> parseLetStmt();
     std::unique_ptr<ast::ConstStmt> parseConstStmt();
     std::unique_ptr<ast::WhileStmt> parseWhileStmt();
     std::unique_ptr<ast::ForStmt> parseForStmt();
     std::unique_ptr<ast::ReturnStmt> parseReturnStmt();
+    std::unique_ptr<ast::BreakStmt> parseBreakStmt();
+    std::unique_ptr<ast::ContinueStmt> parseContinueStmt();
     std::unique_ptr<ast::ExprStmt> parseExprStmt();
 
     std::unique_ptr<ast::Expr> parseExpr();
