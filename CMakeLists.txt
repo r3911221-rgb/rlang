@@ -15,6 +15,7 @@ add_executable(r
     src/bytecode/compiler.cpp
     src/bytecode/vm.cpp
     src/repl/repl.cpp
+    src/gc/gc.cpp
 )
 
 target_include_directories(r PRIVATE src)
