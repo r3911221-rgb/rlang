@@ -1,0 +1,312 @@
+#include "ast.h"
+
+namespace r::ast {
+
+static void ind(std::ostream& os, int level) {
+    for (int i = 0; i < level; ++i) os << "  ";
+}
+
+// --- Destructors ---
+Node::~Node() = default;
+Type::~Type() = default;
+Expr::~Expr() = default;
+Pattern::~Pattern() = default;
+Stmt::~Stmt() = default;
+Item::~Item() = default;
+
+BlockExpr::~BlockExpr() = default;
+IfExpr::~IfExpr() = default;
+MatchExpr::~MatchExpr() = default;
+IfStmt::~IfStmt() = default;
+WhileStmt::~WhileStmt() = default;
+ForStmt::~ForStmt() = default;
+FunctionItem::~FunctionItem() = default;
+
+// --- Types ---
+SimpleType::SimpleType(std::string n) : name(std::move(n)) {}
+void SimpleType::print(std::ostream& os, int indent) const {
+    ind(os, indent); os << "Type(" << name << ")\n";
+}
+
+// --- Expressions ---
+LiteralExpr::LiteralExpr(Kind k, std::string v) : kind(k), value(std::move(v)) {}
+void LiteralExpr::print(std::ostream& os, int indent) const {
+    ind(os, indent);
+    switch (kind) {
+        case Kind::Int: os << "Int(" << value << ")\n"; break;
+        case Kind::Float: os << "Float(" << value << ")\n"; break;
+        case Kind::String: os << "String(\"" << value << "\")\n"; break;
+        case Kind::Bool: os << "Bool(" << value << ")\n"; break;
+        case Kind::Nil: os << "Nil\n"; break;
+    }
+}
+
+IdentifierExpr::IdentifierExpr(std::string n) : name(std::move(n)) {}
+void IdentifierExpr::print(std::ostream& os, int indent) const {
+    ind(os, indent); os << "Ident(" << name << ")\n";
+}
+
+BinaryExpr::BinaryExpr(Op o, std::unique_ptr<Expr> l, std::unique_ptr<Expr> r)
+    : op(o), left(std::move(l)), right(std::move(r)) {}
+
+static const char* opStr(BinaryExpr::Op op) {
+    switch (op) {
+        case BinaryExpr::Op::Add: return "+";
+        case BinaryExpr::Op::Sub: return "-";
+        case BinaryExpr::Op::Mul: return "*";
+        case BinaryExpr::Op::Div: return "/";
+        case BinaryExpr::Op::Mod: return "%";
+        case BinaryExpr::Op::Eq: return "==";
+        case BinaryExpr::Op::Neq: return "!=";
+        case BinaryExpr::Op::Lt: return "<";
+        case BinaryExpr::Op::Gt: return ">";
+        case BinaryExpr::Op::Leq: return "<=";
+        case BinaryExpr::Op::Geq: return ">=";
+        case BinaryExpr::Op::And: return "&&";
+        case BinaryExpr::Op::Or: return "||";
+        case BinaryExpr::Op::BitAnd: return "&";
+        case BinaryExpr::Op::BitOr: return "|";
+        case BinaryExpr::Op::BitXor: return "^";
+        case BinaryExpr::Op::Shl: return "<<";
+        case BinaryExpr::Op::Shr: return ">>";
+        case BinaryExpr::Op::Assign: return "=";
+        case BinaryExpr::Op::Range: return "..";
+        case BinaryExpr::Op::RangeInclusive: return "..=";
+    }
+    return "?";
+}
+
+void BinaryExpr::print(std::ostream& os, int indent) const {
+    ind(os, indent); os << "Binary(" << opStr(op) << ")\n";
+    left->print(os, indent + 1);
+    right->print(os, indent + 1);
+}
+
+UnaryExpr::UnaryExpr(Op o, std::unique_ptr<Expr> e) : op(o), operand(std::move(e)) {}
+static const char* opStr(UnaryExpr::Op op) {
+    switch (op) {
+        case UnaryExpr::Op::Neg: return "-";
+        case UnaryExpr::Op::Not: return "!";
+        case UnaryExpr::Op::BitNot: return "~";
+    }
+    return "?";
+}
+void UnaryExpr::print(std::ostream& os, int indent) const {
+    ind(os, indent); os << "Unary(" << opStr(op) << ")\n";
+    operand->print(os, indent + 1);
+}
+
+CallExpr::CallExpr(std::unique_ptr<Expr> c) : callee(std::move(c)) {}
+void CallExpr::print(std::ostream& os, int indent) const {
+    ind(os, indent); os << "Call\n";
+    callee->print(os, indent + 1);
+    for (const auto& arg : args) {
+        arg->print(os, indent + 1);
+    }
+}
+
+FieldExpr::FieldExpr(std::unique_ptr<Expr> o, std::string f) : object(std::move(o)), field(std::move(f)) {}
+void FieldExpr::print(std::ostream& os, int indent) const {
+    ind(os, indent); os << "Field(." << field << ")\n";
+    object->print(os, indent + 1);
+}
+
+IndexExpr::IndexExpr(std::unique_ptr<Expr> o, std::unique_ptr<Expr> i) : object(std::move(o)), index(std::move(i)) {}
+void IndexExpr::print(std::ostream& os, int indent) const {
+    ind(os, indent); os << "Index\n";
+    object->print(os, indent + 1);
+    index->print(os, indent + 1);
+}
+
+void BlockExpr::print(std::ostream& os, int indent) const {
+    ind(os, indent); os << "Block\n";
+    for (const auto& s : stmts) {
+        s->print(os, indent + 1);
+    }
+}
+
+void IfExpr::print(std::ostream& os, int indent) const {
+    ind(os, indent); os << "If\n";
+    ind(os, indent + 1); os << "Condition\n";
+    condition->print(os, indent + 2);
+    ind(os, indent + 1); os << "Then\n";
+    thenBranch->print(os, indent + 2);
+    if (elseBranch) {
+        ind(os, indent + 1); os << "Else\n";
+        elseBranch->print(os, indent + 2);
+    }
+}
+
+void MatchExpr::print(std::ostream& os, int indent) const {
+    ind(os, indent); os << "Match\n";
+    ind(os, indent + 1); os << "Scrutinee\n";
+    scrutinee->print(os, indent + 2);
+    for (const auto& arm : arms) {
+        ind(os, indent + 1); os << "Arm\n";
+        ind(os, indent + 2); os << "Pattern\n";
+        arm.pattern->print(os, indent + 3);
+        ind(os, indent + 2); os << "Body\n";
+        arm.expr->print(os, indent + 3);
+    }
+}
+
+void ArrayExpr::print(std::ostream& os, int indent) const {
+    ind(os, indent); os << "Array\n";
+    for (const auto& e : elements) {
+        e->print(os, indent + 1);
+    }
+}
+
+RangeExpr::RangeExpr(std::unique_ptr<Expr> s, std::unique_ptr<Expr> e, bool i)
+    : start(std::move(s)), end(std::move(e)), inclusive(i) {}
+void RangeExpr::print(std::ostream& os, int indent) const {
+    ind(os, indent); os << "Range(" << (inclusive ? "..=" : "..") << ")\n";
+    if (start) start->print(os, indent + 1);
+    if (end) end->print(os, indent + 1);
+}
+
+AssignExpr::AssignExpr(std::unique_ptr<Expr> t, std::unique_ptr<Expr> v)
+    : target(std::move(t)), value(std::move(v)) {}
+void AssignExpr::print(std::ostream& os, int indent) const {
+    ind(os, indent); os << "Assign\n";
+    target->print(os, indent + 1);
+    value->print(os, indent + 1);
+}
+
+// --- Patterns ---
+LiteralPattern::LiteralPattern(std::unique_ptr<LiteralExpr> l) : literal(std::move(l)) {}
+void LiteralPattern::print(std::ostream& os, int indent) const {
+    ind(os, indent); os << "PatLiteral\n";
+    literal->print(os, indent + 1);
+}
+
+IdentifierPattern::IdentifierPattern(std::string n) : name(std::move(n)) {}
+void IdentifierPattern::print(std::ostream& os, int indent) const {
+    ind(os, indent); os << "PatIdent(" << name << ")\n";
+}
+
+void WildcardPattern::print(std::ostream& os, int indent) const {
+    ind(os, indent); os << "PatWildcard\n";
+}
+
+// --- Statements ---
+LetStmt::LetStmt(bool m, std::string n, std::unique_ptr<Type> t, std::unique_ptr<Expr> v)
+    : isMut(m), name(std::move(n)), type(std::move(t)), value(std::move(v)) {}
+void LetStmt::print(std::ostream& os, int indent) const {
+    ind(os, indent); os << "Let(" << name << (isMut ? ", mut" : "") << ")\n";
+    if (type) {
+        ind(os, indent + 1); os << "Type\n";
+        type->print(os, indent + 2);
+    }
+    ind(os, indent + 1); os << "Value\n";
+    value->print(os, indent + 2);
+}
+
+ConstStmt::ConstStmt(std::string n, std::unique_ptr<Type> t, std::unique_ptr<Expr> v)
+    : name(std::move(n)), type(std::move(t)), value(std::move(v)) {}
+void ConstStmt::print(std::ostream& os, int indent) const {
+    ind(os, indent); os << "Const(" << name << ")\n";
+    if (type) {
+        ind(os, indent + 1); os << "Type\n";
+        type->print(os, indent + 2);
+    }
+    ind(os, indent + 1); os << "Value\n";
+    value->print(os, indent + 2);
+}
+
+ExprStmt::ExprStmt(std::unique_ptr<Expr> e) : expr(std::move(e)) {}
+void ExprStmt::print(std::ostream& os, int indent) const {
+    ind(os, indent); os << "ExprStmt\n";
+    expr->print(os, indent + 1);
+}
+
+void IfStmt::print(std::ostream& os, int indent) const {
+    ind(os, indent); os << "IfStmt\n";
+    ind(os, indent + 1); os << "Condition\n";
+    condition->print(os, indent + 2);
+    ind(os, indent + 1); os << "Then\n";
+    thenBranch->print(os, indent + 2);
+    if (elseBranch) {
+        ind(os, indent + 1); os << "Else\n";
+        elseBranch->print(os, indent + 2);
+    }
+}
+
+void WhileStmt::print(std::ostream& os, int indent) const {
+    ind(os, indent); os << "While\n";
+    ind(os, indent + 1); os << "Condition\n";
+    condition->print(os, indent + 2);
+    ind(os, indent + 1); os << "Body\n";
+    body->print(os, indent + 2);
+}
+
+void ForStmt::print(std::ostream& os, int indent) const {
+    ind(os, indent); os << "For(" << varName << ")\n";
+    ind(os, indent + 1); os << "Iterable\n";
+    iterable->print(os, indent + 2);
+    ind(os, indent + 1); os << "Body\n";
+    body->print(os, indent + 2);
+}
+
+ReturnStmt::ReturnStmt(std::unique_ptr<Expr> v) : value(std::move(v)) {}
+void ReturnStmt::print(std::ostream& os, int indent) const {
+    ind(os, indent); os << "Return\n";
+    if (value) value->print(os, indent + 1);
+}
+
+void BreakStmt::print(std::ostream& os, int indent) const {
+    ind(os, indent); os << "Break\n";
+}
+
+void ContinueStmt::print(std::ostream& os, int indent) const {
+    ind(os, indent); os << "Continue\n";
+}
+
+// --- Items ---
+void FunctionItem::print(std::ostream& os, int indent) const {
+    ind(os, indent); os << "Function(" << name << ")\n";
+    if (!params.empty()) {
+        ind(os, indent + 1); os << "Params\n";
+        for (const auto& p : params) {
+            ind(os, indent + 2); os << p.name << ": ";
+            if (p.type) p.type->print(os, 0);
+            else os << "auto\n";
+        }
+    }
+    if (returnType) {
+        ind(os, indent + 1); os << "ReturnType\n";
+        returnType->print(os, indent + 2);
+    }
+    ind(os, indent + 1); os << "Body\n";
+    body->print(os, indent + 2);
+}
+
+void LetItem::print(std::ostream& os, int indent) const {
+    ind(os, indent); os << "LetItem(" << name << (isMut ? ", mut" : "") << ")\n";
+    if (type) {
+        ind(os, indent + 1); os << "Type\n";
+        type->print(os, indent + 2);
+    }
+    ind(os, indent + 1); os << "Value\n";
+    value->print(os, indent + 2);
+}
+
+void ConstItem::print(std::ostream& os, int indent) const {
+    ind(os, indent); os << "ConstItem(" << name << ")\n";
+    if (type) {
+        ind(os, indent + 1); os << "Type\n";
+        type->print(os, indent + 2);
+    }
+    ind(os, indent + 1); os << "Value\n";
+    value->print(os, indent + 2);
+}
+
+// --- Program ---
+void Program::print(std::ostream& os, int indent) const {
+    ind(os, indent); os << "Program\n";
+    for (const auto& item : items) {
+        item->print(os, indent + 1);
+    }
+}
+
+} // namespace r::ast
