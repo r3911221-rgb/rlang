@@ -109,7 +109,6 @@ std::vector<Token> Lexer::tokenize() {
                 case ':':
                     advance();
                     if (match(':')) tokens.push_back(makeToken(TokenType::COLON_COLON, "::"));
-                    else if (match('=')) tokens.push_back(makeToken(TokenType::WALRUS, ":="));
                     else tokens.push_back(makeToken(TokenType::COLON, ":"));
                     break;
 
@@ -209,7 +208,7 @@ Token Lexer::readNumber() {
 
     if (!isAtEnd() && peek() == '.' && isDigit(peek(1))) {
         isFloat = true;
-        numStr += advance(); // consume '.'
+        numStr += advance();
         while (!isAtEnd() && isDigit(peek())) {
             numStr += advance();
         }
@@ -223,7 +222,7 @@ Token Lexer::readString() {
     uint32_t startLine = line_;
     uint32_t startCol = column_;
     std::string str;
-    advance(); // opening "
+    advance();
 
     while (!isAtEnd() && peek() != '"') {
         if (peek() == '\\') {
@@ -247,7 +246,7 @@ Token Lexer::readString() {
         return Token{TokenType::ERROR, "Unterminated string", startLine, startCol};
     }
 
-    advance(); // closing "
+    advance();
     return Token{TokenType::STRING_LITERAL, str, startLine, startCol};
 }
 
@@ -261,10 +260,12 @@ Token Lexer::readIdentifier() {
     }
 
     static const std::unordered_map<std::string, TokenType> keywords = {
-        {"fn", TokenType::FN}, {"let", TokenType::LET},
-        {"const", TokenType::CONST}, {"mut", TokenType::MUT},
-        {"if", TokenType::IF}, {"else", TokenType::ELSE},
-        {"match", TokenType::MATCH}, {"while", TokenType::WHILE},
+        {"def", TokenType::DEF}, {"end", TokenType::END},
+        {"let", TokenType::LET}, {"const", TokenType::CONST},
+        {"mut", TokenType::MUT}, {"if", TokenType::IF},
+        {"elsif", TokenType::ELSIF}, {"else", TokenType::ELSE},
+        {"case", TokenType::CASE}, {"when", TokenType::WHEN},
+        {"then", TokenType::THEN}, {"while", TokenType::WHILE},
         {"for", TokenType::FOR}, {"in", TokenType::IN},
         {"break", TokenType::BREAK}, {"continue", TokenType::CONTINUE},
         {"return", TokenType::RETURN}, {"struct", TokenType::STRUCT},
