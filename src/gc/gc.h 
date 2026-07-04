@@ -1,0 +1,70 @@
+#ifndef R_GC_H
+#define R_GC_H
+
+#include "bytecode/value.h"
+#include <vector>
+#include <unordered_set>
+
+namespace r::vm {
+
+struct GCObject {
+    enum class Type { String, Array, Function, Closure, Upvalue };
+    Type type;
+    bool marked = false;
+    GCObject* next = nullptr;
+
+    virtual ~GCObject() = default;
+    virtual size_t size() const = 0;
+};
+
+struct GCString : GCObject {
+    std::string data;
+    GCString() { type = Type::String; }
+    size_t size() const override { return sizeof(*this) + data.capacity(); }
+};
+
+struct GCArray : GCObject {
+    std::vector<Value> elements;
+    GCArray() { type = Type::Array; }
+    size_t size() const override { return sizeof(*this); }
+};
+
+struct GCClosure : GCObject {
+    size_t funcIndex = 0;
+    std::vector<Value> upvalues;
+    GCClosure() { type = Type::Closure; }
+    size_t size() const override { return sizeof(*this); }
+};
+
+class GC {
+public:
+    GC();
+    ~GC();
+
+    GCString* allocateString(const std::string& str);
+    GCArray* allocateArray(const std::vector<Value>& elems);
+    GCClosure* allocateClosure(size_t funcIndex);
+
+    void collect(std::vector<Value>& stack, std::unordered_map<std::string, Value>& globals);
+
+    size_t bytesAllocated() const { return bytesAllocated_; }
+    size_t threshold() const { return nextGC_; }
+
+    void setDebug(bool debug) { debug_ = debug; }
+
+private:
+    GCObject* objects_ = nullptr;
+    size_t bytesAllocated_ = 0;
+    size_t nextGC_ = 1024 * 1024;
+    bool debug_ = false;
+
+    void markRoots(std::vector<Value>& stack, std::unordered_map<std::string, Value>& globals);
+    void markValue(Value& value);
+    void markObject(GCObject* object);
+    void traceReferences();
+    void sweep();
+};
+
+} // namespace r::vm
+
+#endif // R_GC_H
