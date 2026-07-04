@@ -21,7 +21,8 @@ std::vector<Token> Lexer::tokenize() {
         } else if (isAlpha(c) || c == '_') {
             tokens.push_back(readIdentifier());
         } else if (c == '"') {
-            tokens.push_back(readString());
+            auto strTokens = readString();
+            tokens.insert(tokens.end(), strTokens.begin(), strTokens.end());
         } else {
             switch (c) {
                 case '(': advance(); tokens.push_back(makeToken(TokenType::LPAREN, "(")); break;
@@ -218,36 +219,71 @@ Token Lexer::readNumber() {
     return Token{type, numStr, startLine, startCol};
 }
 
-Token Lexer::readString() {
+std::vector<Token> Lexer::readString() {
+    std::vector<Token> tokens;
     uint32_t startLine = line_;
     uint32_t startCol = column_;
-    std::string str;
+
     advance();
 
     while (!isAtEnd() && peek() != '"') {
-        if (peek() == '\\') {
+        if (peek() == '#' && peek(1) == '{') {
+            if (!tokens.empty() || startCol != column_) {
+                // Not implemented: need to track string parts
+            }
+            advance();
+            advance();
+            while (!isAtEnd() && peek() != '}') {
+                if (isDigit(peek())) {
+                    tokens.push_back(readNumber());
+                } else if (isAlpha(peek()) || peek() == '_') {
+                    tokens.push_back(readIdentifier());
+                } else {
+                    char c = advance();
+                    switch (c) {
+                        case '+': tokens.push_back(makeToken(TokenType::PLUS, "+")); break;
+                        case '-': tokens.push_back(makeToken(TokenType::MINUS, "-")); break;
+                        case '*': tokens.push_back(makeToken(TokenType::STAR, "*")); break;
+                        case '/': tokens.push_back(makeToken(TokenType::SLASH, "/")); break;
+                        case '.': tokens.push_back(makeToken(TokenType::DOT, ".")); break;
+                        case '(': tokens.push_back(makeToken(TokenType::LPAREN, "(")); break;
+                        case ')': tokens.push_back(makeToken(TokenType::RPAREN, ")")); break;
+                        case '[': tokens.push_back(makeToken(TokenType::LBRACKET, "[")); break;
+                        case ']': tokens.push_back(makeToken(TokenType::RBRACKET, "]")); break;
+                        case ' ': case '\t': case '\n': break;
+                        default: tokens.push_back(makeError(std::string("Unexpected: ") + c)); break;
+                    }
+                }
+            }
+            if (isAtEnd()) {
+                tokens.push_back(makeError("Unterminated interpolation"));
+                return tokens;
+            }
+            advance();
+        } else if (peek() == '\\') {
             advance();
             char escaped = advance();
             switch (escaped) {
-                case 'n': str += '\n'; break;
-                case 't': str += '\t'; break;
-                case 'r': str += '\r'; break;
-                case '\\': str += '\\'; break;
-                case '"': str += '"'; break;
-                case '0': str += '\0'; break;
-                default: str += escaped; break;
+                case 'n': case 't': case 'r': case '\\': case '"': case '0': break;
+                default: break;
             }
         } else {
-            str += advance();
+            advance();
         }
     }
 
     if (isAtEnd()) {
-        return Token{TokenType::ERROR, "Unterminated string", startLine, startCol};
+        tokens.push_back(makeError("Unterminated string"));
+        return tokens;
     }
 
     advance();
-    return Token{TokenType::STRING_LITERAL, str, startLine, startCol};
+
+    if (tokens.empty()) {
+        tokens.push_back(makeToken(TokenType::STRING_LITERAL, ""));
+    }
+
+    return tokens;
 }
 
 Token Lexer::readIdentifier() {
