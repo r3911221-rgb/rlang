@@ -7,6 +7,8 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 add_executable(r
     src/main.cpp
     src/lexer/lexer.cpp
+    src/ast/ast.cpp
+    src/parser/parser.cpp
 )
 
 target_include_directories(r PRIVATE src)
