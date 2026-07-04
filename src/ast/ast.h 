@@ -1,0 +1,279 @@
+#ifndef R_AST_H
+#define R_AST_H
+
+#include <memory>
+#include <string>
+#include <vector>
+#include <iostream>
+
+namespace r::ast {
+
+struct Stmt;
+struct Pattern;
+struct Type;
+struct Item;
+
+// ------------------------------------------------------------------
+// Base
+// ------------------------------------------------------------------
+struct Node {
+    virtual ~Node();
+    virtual void print(std::ostream& os, int indent = 0) const = 0;
+};
+
+// ------------------------------------------------------------------
+// Types
+// ------------------------------------------------------------------
+struct Type : Node {
+    virtual ~Type();
+};
+
+struct SimpleType : Type {
+    std::string name;
+    explicit SimpleType(std::string n);
+    void print(std::ostream& os, int indent) const override;
+};
+
+// ------------------------------------------------------------------
+// Expressions
+// ------------------------------------------------------------------
+struct Expr : Node {
+    virtual ~Expr();
+};
+
+struct LiteralExpr : Expr {
+    enum class Kind { Int, Float, String, Bool, Nil };
+    Kind kind;
+    std::string value;
+    LiteralExpr(Kind k, std::string v);
+    void print(std::ostream& os, int indent) const override;
+};
+
+struct IdentifierExpr : Expr {
+    std::string name;
+    explicit IdentifierExpr(std::string n);
+    void print(std::ostream& os, int indent) const override;
+};
+
+struct BinaryExpr : Expr {
+    enum class Op {
+        Add, Sub, Mul, Div, Mod,
+        Eq, Neq, Lt, Gt, Leq, Geq,
+        And, Or,
+        BitAnd, BitOr, BitXor, Shl, Shr,
+        Assign, Range, RangeInclusive
+    };
+    Op op;
+    std::unique_ptr<Expr> left;
+    std::unique_ptr<Expr> right;
+    BinaryExpr(Op o, std::unique_ptr<Expr> l, std::unique_ptr<Expr> r);
+    void print(std::ostream& os, int indent) const override;
+};
+
+struct UnaryExpr : Expr {
+    enum class Op { Neg, Not, BitNot };
+    Op op;
+    std::unique_ptr<Expr> operand;
+    UnaryExpr(Op o, std::unique_ptr<Expr> e);
+    void print(std::ostream& os, int indent) const override;
+};
+
+struct CallExpr : Expr {
+    std::unique_ptr<Expr> callee;
+    std::vector<std::unique_ptr<Expr>> args;
+    explicit CallExpr(std::unique_ptr<Expr> c);
+    void print(std::ostream& os, int indent) const override;
+};
+
+struct FieldExpr : Expr {
+    std::unique_ptr<Expr> object;
+    std::string field;
+    FieldExpr(std::unique_ptr<Expr> o, std::string f);
+    void print(std::ostream& os, int indent) const override;
+};
+
+struct IndexExpr : Expr {
+    std::unique_ptr<Expr> object;
+    std::unique_ptr<Expr> index;
+    IndexExpr(std::unique_ptr<Expr> o, std::unique_ptr<Expr> i);
+    void print(std::ostream& os, int indent) const override;
+};
+
+struct BlockExpr : Expr {
+    std::vector<std::unique_ptr<Stmt>> stmts;
+    ~BlockExpr();
+    void print(std::ostream& os, int indent) const override;
+};
+
+struct IfExpr : Expr {
+    std::unique_ptr<Expr> condition;
+    std::unique_ptr<BlockExpr> thenBranch;
+    std::unique_ptr<Expr> elseBranch;
+    ~IfExpr();
+    void print(std::ostream& os, int indent) const override;
+};
+
+struct MatchExpr : Expr {
+    struct Arm {
+        std::unique_ptr<Pattern> pattern;
+        std::unique_ptr<Expr> expr;
+    };
+    std::unique_ptr<Expr> scrutinee;
+    std::vector<Arm> arms;
+    ~MatchExpr();
+    void print(std::ostream& os, int indent) const override;
+};
+
+struct ArrayExpr : Expr {
+    std::vector<std::unique_ptr<Expr>> elements;
+    void print(std::ostream& os, int indent) const override;
+};
+
+struct RangeExpr : Expr {
+    std::unique_ptr<Expr> start;
+    std::unique_ptr<Expr> end;
+    bool inclusive;
+    RangeExpr(std::unique_ptr<Expr> s, std::unique_ptr<Expr> e, bool i);
+    void print(std::ostream& os, int indent) const override;
+};
+
+struct AssignExpr : Expr {
+    std::unique_ptr<Expr> target;
+    std::unique_ptr<Expr> value;
+    AssignExpr(std::unique_ptr<Expr> t, std::unique_ptr<Expr> v);
+    void print(std::ostream& os, int indent) const override;
+};
+
+// ------------------------------------------------------------------
+// Patterns
+// ------------------------------------------------------------------
+struct Pattern : Node {
+    virtual ~Pattern();
+};
+
+struct LiteralPattern : Pattern {
+    std::unique_ptr<LiteralExpr> literal;
+    explicit LiteralPattern(std::unique_ptr<LiteralExpr> l);
+    void print(std::ostream& os, int indent) const override;
+};
+
+struct IdentifierPattern : Pattern {
+    std::string name;
+    explicit IdentifierPattern(std::string n);
+    void print(std::ostream& os, int indent) const override;
+};
+
+struct WildcardPattern : Pattern {
+    void print(std::ostream& os, int indent) const override;
+};
+
+// ------------------------------------------------------------------
+// Statements
+// ------------------------------------------------------------------
+struct Stmt : Node {
+    virtual ~Stmt();
+};
+
+struct LetStmt : Stmt {
+    bool isMut;
+    std::string name;
+    std::unique_ptr<Type> type;
+    std::unique_ptr<Expr> value;
+    LetStmt(bool m, std::string n, std::unique_ptr<Type> t, std::unique_ptr<Expr> v);
+    void print(std::ostream& os, int indent) const override;
+};
+
+struct ConstStmt : Stmt {
+    std::string name;
+    std::unique_ptr<Type> type;
+    std::unique_ptr<Expr> value;
+    ConstStmt(std::string n, std::unique_ptr<Type> t, std::unique_ptr<Expr> v);
+    void print(std::ostream& os, int indent) const override;
+};
+
+struct ExprStmt : Stmt {
+    std::unique_ptr<Expr> expr;
+    explicit ExprStmt(std::unique_ptr<Expr> e);
+    void print(std::ostream& os, int indent) const override;
+};
+
+struct IfStmt : Stmt {
+    std::unique_ptr<Expr> condition;
+    std::unique_ptr<BlockExpr> thenBranch;
+    std::unique_ptr<Stmt> elseBranch;
+    ~IfStmt();
+    void print(std::ostream& os, int indent) const override;
+};
+
+struct WhileStmt : Stmt {
+    std::unique_ptr<Expr> condition;
+    std::unique_ptr<BlockExpr> body;
+    ~WhileStmt();
+    void print(std::ostream& os, int indent) const override;
+};
+
+struct ForStmt : Stmt {
+    std::string varName;
+    std::unique_ptr<Expr> iterable;
+    std::unique_ptr<BlockExpr> body;
+    ~ForStmt();
+    void print(std::ostream& os, int indent) const override;
+};
+
+struct ReturnStmt : Stmt {
+    std::unique_ptr<Expr> value;
+    explicit ReturnStmt(std::unique_ptr<Expr> v);
+    void print(std::ostream& os, int indent) const override;
+};
+
+struct BreakStmt : Stmt {
+    void print(std::ostream& os, int indent) const override;
+};
+
+struct ContinueStmt : Stmt {
+    void print(std::ostream& os, int indent) const override;
+};
+
+// ------------------------------------------------------------------
+// Items (top-level declarations)
+// ------------------------------------------------------------------
+struct Item : Node {
+    virtual ~Item();
+};
+
+struct FunctionItem : Item {
+    std::string name;
+    struct Param {
+        std::string name;
+        std::unique_ptr<Type> type;
+    };
+    std::vector<Param> params;
+    std::unique_ptr<Type> returnType;
+    std::unique_ptr<BlockExpr> body;
+    ~FunctionItem();
+    void print(std::ostream& os, int indent) const override;
+};
+
+struct LetItem : Item {
+    bool isMut;
+    std::string name;
+    std::unique_ptr<Type> type;
+    std::unique_ptr<Expr> value;
+    void print(std::ostream& os, int indent) const override;
+};
+
+struct ConstItem : Item {
+    std::string name;
+    std::unique_ptr<Type> type;
+    std::unique_ptr<Expr> value;
+    void print(std::ostream& os, int indent) const override;
+};
+
+struct Program : Node {
+    std::vector<std::unique_ptr<Item>> items;
+    void print(std::ostream& os, int indent) const override;
+};
+
+} // namespace r::ast
+
+#endif // R_AST_H
