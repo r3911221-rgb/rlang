@@ -1,0 +1,95 @@
+#include "repl/repl.h"
+#include "lexer/lexer.h"
+#include "parser/parser.h"
+#include "ast/ast.h"
+#include "semantic/semantic.h"
+#include "bytecode/compiler.h"
+#include "bytecode/vm.h"
+#include <iostream>
+#include <sstream>
+
+namespace r {
+
+void REPL::run() {
+    printBanner();
+
+    while (true) {
+        std::cout << (buffer_.empty() ? "r> " : "  ");
+        std::string line;
+        if (!std::getline(std::cin, line)) {
+            std::cout << "\n";
+            break;
+        }
+
+        if (line == "exit" || line == "quit") break;
+        if (line == "clear") {
+            buffer_.clear();
+            braceCount_ = 0;
+            parenCount_ = 0;
+            bracketCount_ = 0;
+            continue;
+        }
+
+        buffer_ += line + "\n";
+
+        if (!isComplete(line)) continue;
+
+        evaluate(buffer_);
+
+        buffer_.clear();
+        braceCount_ = 0;
+        parenCount_ = 0;
+        bracketCount_ = 0;
+    }
+}
+
+bool REPL::isComplete(const std::string& line) {
+    for (char c : line) {
+        switch (c) {
+            case '{': braceCount_++; break;
+            case '}': braceCount_--; break;
+            case '(': parenCount_++; break;
+            case ')': parenCount_--; break;
+            case '[': bracketCount_++; break;
+            case ']': bracketCount_--; break;
+        }
+    }
+    return braceCount_ <= 0 && parenCount_ <= 0 && bracketCount_ <= 0;
+}
+
+void REPL::evaluate(const std::string& source) {
+    try {
+        Lexer lexer(source);
+        auto tokens = lexer.tokenize();
+
+        Parser parser(std::move(tokens));
+        auto program = parser.parse();
+
+        semantic::SemanticAnalyzer analyzer;
+        auto errors = analyzer.analyze(program.get());
+        if (!errors.empty()) {
+            std::cerr << "Semantic errors (" << errors.size() << "):\n";
+            for (const auto& e : errors) {
+                std::cerr << "  [Line " << e.line << "] " << e.message << "\n";
+            }
+            return;
+        }
+
+        vm::Chunk chunk;
+        vm::Compiler compiler(&chunk);
+        compiler.compile(program.get());
+
+        vm::VM vm;
+        vm.execute(&chunk);
+
+    } catch (const std::exception& e) {
+        std::cerr << "Error: " << e.what() << "\n";
+    }
+}
+
+void REPL::printBanner() {
+    std::cout << "R Language 0.1.0\n";
+    std::cout << "Type 'exit' to quit, 'clear' to reset buffer\n\n";
+}
+
+} // namespace r
