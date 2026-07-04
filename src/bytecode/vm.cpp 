@@ -1,0 +1,360 @@
+#include "bytecode/vm.h"
+#include <iostream>
+#include <stdexcept>
+
+namespace r::vm {
+
+void VM::execute(Chunk* chunk) {
+    chunk_ = chunk;
+    ip_ = 0;
+    stack_.clear();
+    globals_.clear();
+    globals_["println"] = Value::string_("println");
+    globals_["print"] = Value::string_("print");
+    run();
+}
+
+void VM::reset() {
+    ip_ = 0;
+    stack_.clear();
+}
+
+uint8_t VM::readByte() {
+    return chunk_->code[ip_++];
+}
+
+uint16_t VM::readShort() {
+    uint16_t high = readByte();
+    uint16_t low = readByte();
+    return (high << 8) | low;
+}
+
+Value VM::readConstant() {
+    return chunk_->constants[readByte()];
+}
+
+uint32_t VM::readLine() {
+    return chunk_->lines[ip_];
+}
+
+void VM::push(const Value& value) {
+    stack_.push_back(value);
+}
+
+Value VM::pop() {
+    Value v = stack_.back();
+    stack_.pop_back();
+    return v;
+}
+
+Value& VM::peek(size_t distance) {
+    return stack_[stack_.size() - 1 - distance];
+}
+
+void VM::runtimeError(const std::string& msg) {
+    std::cerr << "Runtime error: " << msg << "\n";
+    throw std::runtime_error(msg);
+}
+
+bool VM::callValue(const Value& callee, uint8_t argCount) {
+    std::vector<Value> args;
+    for (int i = 0; i < argCount; ++i) {
+        args.insert(args.begin(), pop());
+    }
+    pop();
+
+    if (callee.isString() && callee.s == "println") {
+        if (args.size() >= 1) std::cout << args[0].toString() << "\n";
+        push(Value::nil());
+        return true;
+    }
+    if (callee.isString() && callee.s == "print") {
+        if (args.size() >= 1) std::cout << args[0].toString();
+        push(Value::nil());
+        return true;
+    }
+    runtimeError("Can only call functions.");
+    return false;
+}
+
+void VM::run() {
+    while (ip_ < chunk_->code.size()) {
+        uint8_t instruction = readByte();
+        switch (static_cast<OpCode>(instruction)) {
+            case OpCode::OP_NIL: push(Value::nil()); break;
+            case OpCode::OP_TRUE: push(Value::bool_(true)); break;
+            case OpCode::OP_FALSE: push(Value::bool_(false)); break;
+            case OpCode::OP_CONST: push(readConstant()); break;
+
+            case OpCode::OP_ADD: {
+                Value b = pop();
+                Value a = pop();
+                if (a.isNumeric() && b.isNumeric()) {
+                    if (a.isFloat() || b.isFloat()) {
+                        push(Value::float_(a.asNumber() + b.asNumber()));
+                    } else {
+                        push(Value::int_(a.as.i + b.as.i));
+                    }
+                } else if (a.isString() && b.isString()) {
+                    push(Value::string_(a.s + b.s));
+                } else {
+                    runtimeError("Operands must be numeric or string.");
+                }
+                break;
+            }
+            case OpCode::OP_SUB: {
+                Value b = pop(); Value a = pop();
+                if (!a.isNumeric() || !b.isNumeric()) runtimeError("Operands must be numeric.");
+                if (a.isFloat() || b.isFloat()) push(Value::float_(a.asNumber() - b.asNumber()));
+                else push(Value::int_(a.as.i - b.as.i));
+                break;
+            }
+            case OpCode::OP_MUL: {
+                Value b = pop(); Value a = pop();
+                if (!a.isNumeric() || !b.isNumeric()) runtimeError("Operands must be numeric.");
+                if (a.isFloat() || b.isFloat()) push(Value::float_(a.asNumber() * b.asNumber()));
+                else push(Value::int_(a.as.i * b.as.i));
+                break;
+            }
+            case OpCode::OP_DIV: {
+                Value b = pop(); Value a = pop();
+                if (!a.isNumeric() || !b.isNumeric()) runtimeError("Operands must be numeric.");
+                if (b.asNumber() == 0) runtimeError("Division by zero.");
+                push(Value::float_(a.asNumber() / b.asNumber()));
+                break;
+            }
+            case OpCode::OP_MOD: {
+                Value b = pop(); Value a = pop();
+                if (!a.isInt() || !b.isInt()) runtimeError("Operands must be integers.");
+                if (b.as.i == 0) runtimeError("Division by zero.");
+                push(Value::int_(a.as.i % b.as.i));
+                break;
+            }
+
+            case OpCode::OP_EQ: {
+                Value b = pop(); Value a = pop();
+                push(Value::bool_(a == b));
+                break;
+            }
+            case OpCode::OP_NEQ: {
+                Value b = pop(); Value a = pop();
+                push(Value::bool_(!(a == b)));
+                break;
+            }
+            case OpCode::OP_LT: {
+                Value b = pop(); Value a = pop();
+                if (!a.isNumeric() || !b.isNumeric()) runtimeError("Operands must be numeric.");
+                push(Value::bool_(a.asNumber() < b.asNumber()));
+                break;
+            }
+            case OpCode::OP_GT: {
+                Value b = pop(); Value a = pop();
+                if (!a.isNumeric() || !b.isNumeric()) runtimeError("Operands must be numeric.");
+                push(Value::bool_(a.asNumber() > b.asNumber()));
+                break;
+            }
+            case OpCode::OP_LEQ: {
+                Value b = pop(); Value a = pop();
+                if (!a.isNumeric() || !b.isNumeric()) runtimeError("Operands must be numeric.");
+                push(Value::bool_(a.asNumber() <= b.asNumber()));
+                break;
+            }
+            case OpCode::OP_GEQ: {
+                Value b = pop(); Value a = pop();
+                if (!a.isNumeric() || !b.isNumeric()) runtimeError("Operands must be numeric.");
+                push(Value::bool_(a.asNumber() >= b.asNumber()));
+                break;
+            }
+
+            case OpCode::OP_AND: {
+                Value b = pop(); Value a = pop();
+                push(Value::bool_(a.isBool() && b.isBool() && a.as.b && b.as.b));
+                break;
+            }
+            case OpCode::OP_OR: {
+                Value b = pop(); Value a = pop();
+                push(Value::bool_(a.isBool() && b.isBool() && (a.as.b || b.as.b)));
+                break;
+            }
+
+            case OpCode::OP_NOT: {
+                Value a = pop();
+                push(Value::bool_(a.isNil() || (a.isBool() && !a.as.b)));
+                break;
+            }
+            case OpCode::OP_NEG: {
+                Value a = pop();
+                if (a.isInt()) push(Value::int_(-a.as.i));
+                else if (a.isFloat()) push(Value::float_(-a.as.f));
+                else runtimeError("Operand must be numeric.");
+                break;
+            }
+            case OpCode::OP_BIT_NOT: {
+                Value a = pop();
+                if (!a.isInt()) runtimeError("Operand must be integer.");
+                push(Value::int_(~a.as.i));
+                break;
+            }
+            case OpCode::OP_BIT_AND: {
+                Value b = pop(); Value a = pop();
+                if (!a.isInt() || !b.isInt()) runtimeError("Operands must be integers.");
+                push(Value::int_(a.as.i & b.as.i));
+                break;
+            }
+            case OpCode::OP_BIT_OR: {
+                Value b = pop(); Value a = pop();
+                if (!a.isInt() || !b.isInt()) runtimeError("Operands must be integers.");
+                push(Value::int_(a.as.i | b.as.i));
+                break;
+            }
+            case OpCode::OP_BIT_XOR: {
+                Value b = pop(); Value a = pop();
+                if (!a.isInt() || !b.isInt()) runtimeError("Operands must be integers.");
+                push(Value::int_(a.as.i ^ b.as.i));
+                break;
+            }
+            case OpCode::OP_SHL: {
+                Value b = pop(); Value a = pop();
+                if (!a.isInt() || !b.isInt()) runtimeError("Operands must be integers.");
+                push(Value::int_(a.as.i << b.as.i));
+                break;
+            }
+            case OpCode::OP_SHR: {
+                Value b = pop(); Value a = pop();
+                if (!a.isInt() || !b.isInt()) runtimeError("Operands must be integers.");
+                push(Value::int_(a.as.i >> b.as.i));
+                break;
+            }
+
+            case OpCode::OP_PRINT: {
+                Value v = pop();
+                std::cout << v.toString() << "\n";
+                break;
+            }
+            case OpCode::OP_POP: pop(); break;
+            case OpCode::OP_DUP: push(peek()); break;
+
+            case OpCode::OP_DEFINE_GLOBAL: {
+                std::string name = readConstant().s;
+                globals_[name] = pop();
+                break;
+            }
+            case OpCode::OP_GET_GLOBAL: {
+                std::string name = readConstant().s;
+                auto it = globals_.find(name);
+                if (it == globals_.end()) runtimeError("Undefined variable: " + name);
+                push(it->second);
+                break;
+            }
+            case OpCode::OP_SET_GLOBAL: {
+                std::string name = readConstant().s;
+                auto it = globals_.find(name);
+                if (it == globals_.end()) runtimeError("Undefined variable: " + name);
+                it->second = peek();
+                break;
+            }
+
+            case OpCode::OP_GET_LOCAL: {
+                uint8_t slot = readByte();
+                push(stack_[slot]);
+                break;
+            }
+            case OpCode::OP_SET_LOCAL: {
+                uint8_t slot = readByte();
+                stack_[slot] = peek();
+                break;
+            }
+
+            case OpCode::OP_JUMP: {
+                uint16_t offset = readShort();
+                ip_ += offset;
+                break;
+            }
+            case OpCode::OP_JUMP_IF_FALSE: {
+                uint16_t offset = readShort();
+                if (peek().isNil() || (peek().isBool() && !peek().as.b)) ip_ += offset;
+                break;
+            }
+            case OpCode::OP_LOOP: {
+                uint16_t offset = readShort();
+                ip_ -= offset;
+                break;
+            }
+
+            case OpCode::OP_CALL: {
+                uint8_t argCount = readByte();
+                Value callee = peek(argCount);
+                callValue(callee, argCount);
+                break;
+            }
+            case OpCode::OP_RETURN: {
+                return;
+            }
+
+            case OpCode::OP_ARRAY: {
+                uint8_t count = readByte();
+                std::vector<Value> elements;
+                for (int i = 0; i < count; ++i) {
+                    elements.insert(elements.begin(), pop());
+                }
+                push(Value::array_(std::move(elements)));
+                break;
+            }
+            case OpCode::OP_INDEX: {
+                Value idx = pop();
+                Value obj = pop();
+                if (obj.isArray() && idx.isInt()) {
+                    if (idx.as.i < 0 || idx.as.i >= static_cast<int64_t>(obj.array.size())) {
+                        runtimeError("Array index out of bounds.");
+                    }
+                    push(obj.array[idx.as.i]);
+                } else if (obj.isString() && idx.isInt()) {
+                    if (idx.as.i < 0 || idx.as.i >= static_cast<int64_t>(obj.s.size())) {
+                        runtimeError("String index out of bounds.");
+                    }
+                    push(Value::string_(std::string(1, obj.s[idx.as.i])));
+                } else if (obj.isString() && idx.isString()) {
+                    if (idx.s == "length") {
+                        push(Value::int_(static_cast<int64_t>(obj.s.size())));
+                    } else {
+                        runtimeError("Unknown field.");
+                    }
+                } else {
+                    runtimeError("Invalid index operation.");
+                }
+                break;
+            }
+            case OpCode::OP_SET_INDEX: {
+                Value val = pop();
+                Value idx = pop();
+                Value obj = pop();
+                if (obj.isArray() && idx.isInt()) {
+                    if (idx.as.i < 0 || idx.as.i >= static_cast<int64_t>(obj.array.size())) {
+                        runtimeError("Array index out of bounds.");
+                    }
+                    obj.array[idx.as.i] = val;
+                    push(val);
+                } else {
+                    runtimeError("Invalid set index operation.");
+                }
+                break;
+            }
+
+            case OpCode::OP_RANGE: {
+                Value end = pop();
+                Value start = pop();
+                if (!start.isInt() || !end.isInt()) runtimeError("Range bounds must be integers.");
+                std::vector<Value> elements;
+                int64_t s = start.as.i;
+                int64_t e = end.as.i;
+                for (int64_t i = s; i < e; ++i) {
+                    elements.push_back(Value::int_(i));
+                }
+                push(Value::array_(std::move(elements)));
+                break;
+            }
+        }
+    }
+}
+
+} // namespace r::vm
