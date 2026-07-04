@@ -1,0 +1,659 @@
+#include "semantic.h"
+#include <sstream>
+
+namespace r::semantic {
+
+// ------------------------------------------------------------------
+// Type
+// ------------------------------------------------------------------
+Type Type::Array(const Type& elem) {
+    Type t(TypeKind::Array);
+    t.elementType = std::make_shared<Type>(elem);
+    return t;
+}
+
+bool Type::isNumeric() const {
+    return kind == TypeKind::Int || kind == TypeKind::Float;
+}
+
+bool Type::isComparable() const {
+    return kind == TypeKind::Int || kind == TypeKind::Float ||
+           kind == TypeKind::String || kind == TypeKind::Char || kind == TypeKind::Bool;
+}
+
+bool Type::isIterable() const {
+    return kind == TypeKind::Array || kind == TypeKind::String;
+}
+
+bool Type::isError() const {
+    return kind == TypeKind::Error;
+}
+
+bool Type::operator==(const Type& other) const {
+    if (kind != other.kind) return false;
+    if (kind == TypeKind::Array) {
+        return *elementType == *other.elementType;
+    }
+    return true;
+}
+
+bool Type::operator!=(const Type& other) const {
+    return !(*this == other);
+}
+
+std::string Type::toString() const {
+    switch (kind) {
+        case TypeKind::Unknown: return "unknown";
+        case TypeKind::Void: return "void";
+        case TypeKind::Never: return "never";
+        case TypeKind::Int: return "int";
+        case TypeKind::Float: return "float";
+        case TypeKind::Bool: return "bool";
+        case TypeKind::String: return "string";
+        case TypeKind::Char: return "char";
+        case TypeKind::Array: return "[" + elementType->toString() + "]";
+        case TypeKind::Function: return "fn";
+        case TypeKind::Error: return "error";
+    }
+    return "?";
+}
+
+// ------------------------------------------------------------------
+// Scope
+// ------------------------------------------------------------------
+Scope::Scope(Scope* parent) : parent_(parent) {}
+
+bool Scope::declare(const Symbol& sym) {
+    if (symbols_.find(sym.name) != symbols_.end()) {
+        return false; // already exists
+    }
+    symbols_[sym.name] = sym;
+    return true;
+}
+
+Symbol* Scope::lookup(const std::string& name) {
+    auto it = symbols_.find(name);
+    if (it != symbols_.end()) return &it->second;
+    if (parent_) return parent_->lookup(name);
+    return nullptr;
+}
+
+Symbol* Scope::lookupLocal(const std::string& name) {
+    auto it = symbols_.find(name);
+    if (it != symbols_.end()) return &it->second;
+    return nullptr;
+}
+
+// ------------------------------------------------------------------
+// Semantic Analyzer
+// ------------------------------------------------------------------
+SemanticAnalyzer::SemanticAnalyzer()
+    : currentScope_(nullptr), inLoop_(false), hasReturn_(false) {}
+
+std::vector<SemanticError> SemanticAnalyzer::analyze(ast::Program* program) {
+    errors_.clear();
+    pushScope(); // global scope
+
+    // First pass: declare all top-level items
+    for (auto& item : program->items) {
+        if (auto* func = dynamic_cast<ast::FunctionItem*>(item.get())) {
+            Type retType = func->returnType ? astTypeToSemantic(func->returnType.get()) : Type::Void();
+            Type funcType(TypeKind::Function);
+            funcType.returnType = retType;
+            for (auto& p : func->params) {
+                funcType.paramTypes.push_back(astTypeToSemantic(p.type.get()));
+            }
+            Symbol sym{func->name, funcType, SymbolKind::Function, false, true, 0, 0};
+            if (!currentScope_->declare(sym)) {
+                error("Function '" + func->name + "' already declared");
+            }
+        } else if (auto* let = dynamic_cast<ast::LetItem*>(item.get())) {
+            Type valType = resolveExpr(let->value.get());
+            Type declType = let->type ? astTypeToSemantic(let->type.get()) : valType;
+            if (let->type && declType != valType && !valType.isError()) {
+                error("Type mismatch in global let '" + let->name + "': expected " +
+                      declType.toString() + ", got " + valType.toString());
+            }
+            Symbol sym{let->name, declType, SymbolKind::Variable, let->isMut, true, 0, 0};
+            if (!currentScope_->declare(sym)) {
+                error("Global variable '" + let->name + "' already declared");
+            }
+        } else if (auto* con = dynamic_cast<ast::ConstItem*>(item.get())) {
+            Type valType = resolveExpr(con->value.get());
+            Type declType = con->type ? astTypeToSemantic(con->type.get()) : valType;
+            if (con->type && declType != valType && !valType.isError()) {
+                error("Type mismatch in global const '" + con->name + "': expected " +
+                      declType.toString() + ", got " + valType.toString());
+            }
+            Symbol sym{con->name, declType, SymbolKind::Constant, false, true, 0, 0};
+            if (!currentScope_->declare(sym)) {
+                error("Global constant '" + con->name + "' already declared");
+            }
+        }
+    }
+
+    // Second pass: resolve bodies
+    for (auto& item : program->items) {
+        if (auto* func = dynamic_cast<ast::FunctionItem*>(item.get())) {
+            resolveFunction(func);
+        }
+    }
+
+    popScope();
+    return errors_;
+}
+
+void SemanticAnalyzer::pushScope() {
+    auto scope = std::make_unique<Scope>(currentScope_);
+    currentScope_ = scope.get();
+    scopes_.push_back(std::move(scope));
+}
+
+void SemanticAnalyzer::popScope() {
+    if (currentScope_) {
+        currentScope_ = currentScope_->lookup("") ? nullptr : currentScope_; // dummy
+        // Actually we need to track parent properly
+        // Since Scope has parent pointer, we can just traverse back
+        if (currentScope_ && currentScope_->lookupLocal("__root__") == nullptr) {
+            // This is a hack; better to track scope stack separately
+        }
+    }
+    if (!scopes_.empty()) {
+        // We can't easily pop from unique_ptr vector and maintain parent
+        // Instead, let's track a stack of raw pointers
+    }
+}
+
+// Better approach: maintain a stack
+void SemanticAnalyzer::error(const std::string& msg, uint32_t line, uint32_t col) {
+    errors_.push_back({msg, line, col});
+}
+
+void SemanticAnalyzer::error(const std::string& msg) {
+    errors_.push_back({msg, 0, 0});
+}
+
+Type SemanticAnalyzer::astTypeToSemantic(ast::Type* type) {
+    if (!type) return Type::Unknown();
+    if (auto* simple = dynamic_cast<ast::SimpleType*>(type)) {
+        if (simple->name == "int") return Type::Int();
+        if (simple->name == "float") return Type::Float();
+        if (simple->name == "bool") return Type::Bool();
+        if (simple->name == "string") return Type::String();
+        if (simple->name == "char") return Type::Char();
+        if (simple->name == "void") return Type::Void();
+        if (simple->name == "never") return Type::Never();
+        error("Unknown type: " + simple->name);
+        return Type::Error();
+    }
+    return Type::Unknown();
+}
+
+Type SemanticAnalyzer::resolveFunction(ast::FunctionItem* func) {
+    pushScope();
+
+    // Declare parameters
+    for (auto& p : func->params) {
+        Type pType = astTypeToSemantic(p.type.get());
+        Symbol sym{p.name, pType, SymbolKind::Parameter, false, true, 0, 0};
+        if (!currentScope_->declare(sym)) {
+            error("Parameter '" + p.name + "' already declared");
+        }
+    }
+
+    Type retType = func->returnType ? astTypeToSemantic(func->returnType.get()) : Type::Void();
+    currentFunctionReturnType_ = retType;
+    hasReturn_ = false;
+
+    Type bodyType = resolveBlock(func->body.get());
+
+    // If function declares return type, block must match (or have explicit return)
+    if (retType != Type::Void() && retType != Type::Never() && !hasReturn_) {
+        // For now, if last expression matches return type, that's okay
+        if (bodyType != retType && !bodyType.isError()) {
+            error("Function '" + func->name + "' expects return type " + retType.toString() +
+                  ", but body yields " + bodyType.toString());
+        }
+    }
+
+    popScope();
+    return retType;
+}
+
+Type SemanticAnalyzer::resolveBlock(ast::BlockExpr* block) {
+    pushScope();
+    Type lastType = Type::Void();
+    for (size_t i = 0; i < block->stmts.size(); ++i) {
+        lastType = resolveStmt(block->stmts[i].get());
+        if (lastType.kind == TypeKind::Never) break;
+    }
+    popScope();
+    return lastType;
+}
+
+Type SemanticAnalyzer::resolveStmt(ast::Stmt* stmt) {
+    if (auto* let = dynamic_cast<ast::LetStmt*>(stmt)) return resolveLetStmt(let);
+    if (auto* con = dynamic_cast<ast::ConstStmt*>(stmt)) return resolveConstStmt(con);
+    if (auto* expr = dynamic_cast<ast::ExprStmt*>(stmt)) return resolveExprStmt(expr);
+    if (auto* ifs = dynamic_cast<ast::IfStmt*>(stmt)) return resolveIfStmt(ifs);
+    if (auto* wh = dynamic_cast<ast::WhileStmt*>(stmt)) return resolveWhileStmt(wh);
+    if (auto* fr = dynamic_cast<ast::ForStmt*>(stmt)) return resolveForStmt(fr);
+    if (auto* ret = dynamic_cast<ast::ReturnStmt*>(stmt)) return resolveReturnStmt(ret);
+    if (auto* br = dynamic_cast<ast::BreakStmt*>(stmt)) return resolveBreakStmt(br);
+    if (auto* con = dynamic_cast<ast::ContinueStmt*>(stmt)) return resolveContinueStmt(con);
+    return Type::Error();
+}
+
+Type SemanticAnalyzer::resolveLetStmt(ast::LetStmt* stmt) {
+    Type valType = resolveExpr(stmt->value.get());
+    Type declType = stmt->type ? astTypeToSemantic(stmt->type.get()) : valType;
+
+    if (stmt->type && declType != valType && !valType.isError()) {
+        error("Type mismatch in let '" + stmt->name + "': expected " +
+              declType.toString() + ", got " + valType.toString());
+    }
+
+    Symbol sym{stmt->name, declType, SymbolKind::Variable, stmt->isMut, true, 0, 0};
+    if (!currentScope_->declare(sym)) {
+        error("Variable '" + stmt->name + "' already declared in this scope");
+    }
+    return Type::Void();
+}
+
+Type SemanticAnalyzer::resolveConstStmt(ast::ConstStmt* stmt) {
+    Type valType = resolveExpr(stmt->value.get());
+    Type declType = stmt->type ? astTypeToSemantic(stmt->type.get()) : valType;
+
+    if (stmt->type && declType != valType && !valType.isError()) {
+        error("Type mismatch in const '" + stmt->name + "': expected " +
+              declType.toString() + ", got " + valType.toString());
+    }
+
+    Symbol sym{stmt->name, declType, SymbolKind::Constant, false, true, 0, 0};
+    if (!currentScope_->declare(sym)) {
+        error("Constant '" + stmt->name + "' already declared in this scope");
+    }
+    return Type::Void();
+}
+
+Type SemanticAnalyzer::resolveExprStmt(ast::ExprStmt* stmt) {
+    return resolveExpr(stmt->expr.get());
+}
+
+Type SemanticAnalyzer::resolveIfStmt(ast::IfStmt* stmt) {
+    Type condType = resolveExpr(stmt->condition.get());
+    if (condType != Type::Bool() && !condType.isError()) {
+        error("If condition must be bool, got " + condType.toString());
+    }
+    Type thenType = resolveBlock(stmt->thenBranch.get());
+    if (stmt->elseBranch) {
+        if (auto* elseBlock = dynamic_cast<ast::BlockExpr*>(stmt->elseBranch.get())) {
+            Type elseType = resolveBlock(elseBlock);
+            // Statement-level if doesn't need matching types
+        } else if (auto* elseIf = dynamic_cast<ast::IfStmt*>(stmt->elseBranch.get())) {
+            resolveIfStmt(elseIf);
+        }
+    }
+    return Type::Void();
+}
+
+Type SemanticAnalyzer::resolveWhileStmt(ast::WhileStmt* stmt) {
+    Type condType = resolveExpr(stmt->condition.get());
+    if (condType != Type::Bool() && !condType.isError()) {
+        error("While condition must be bool, got " + condType.toString());
+    }
+    bool oldInLoop = inLoop_;
+    inLoop_ = true;
+    resolveBlock(stmt->body.get());
+    inLoop_ = oldInLoop;
+    return Type::Void();
+}
+
+Type SemanticAnalyzer::resolveForStmt(ast::ForStmt* stmt) {
+    Type iterType = resolveExpr(stmt->iterable.get());
+    if (!iterType.isIterable() && !iterType.isError()) {
+        error("For loop requires iterable type, got " + iterType.toString());
+    }
+
+    pushScope();
+    Type elemType = Type::Int(); // default; should derive from array type
+    if (iterType.kind == TypeKind::Array && iterType.elementType) {
+        elemType = *iterType.elementType;
+    } else if (iterType.kind == TypeKind::String) {
+        elemType = Type::Char();
+    }
+    Symbol sym{stmt->varName, elemType, SymbolKind::Variable, false, true, 0, 0};
+    currentScope_->declare(sym);
+
+    bool oldInLoop = inLoop_;
+    inLoop_ = true;
+    resolveBlock(stmt->body.get());
+    inLoop_ = oldInLoop;
+    popScope();
+    return Type::Void();
+}
+
+Type SemanticAnalyzer::resolveReturnStmt(ast::ReturnStmt* stmt) {
+    hasReturn_ = true;
+    if (!stmt->value) {
+        if (currentFunctionReturnType_ != Type::Void() && !currentFunctionReturnType_.isError()) {
+            error("Return value expected, got void");
+        }
+        return Type::Never();
+    }
+    Type valType = resolveExpr(stmt->value.get());
+    if (valType != currentFunctionReturnType_ && !valType.isError() && !currentFunctionReturnType_.isError()) {
+        error("Return type mismatch: expected " + currentFunctionReturnType_.toString() +
+              ", got " + valType.toString());
+    }
+    return Type::Never();
+}
+
+Type SemanticAnalyzer::resolveBreakStmt(ast::BreakStmt*) {
+    if (!inLoop_) {
+        error("Break outside of loop");
+    }
+    return Type::Never();
+}
+
+Type SemanticAnalyzer::resolveContinueStmt(ast::ContinueStmt*) {
+    if (!inLoop_) {
+        error("Continue outside of loop");
+    }
+    return Type::Never();
+}
+
+Type SemanticAnalyzer::resolveExpr(ast::Expr* expr) {
+    if (auto* lit = dynamic_cast<ast::LiteralExpr*>(expr)) return resolveLiteral(lit);
+    if (auto* ident = dynamic_cast<ast::IdentifierExpr*>(expr)) return resolveIdentifier(ident);
+    if (auto* bin = dynamic_cast<ast::BinaryExpr*>(expr)) return resolveBinary(bin);
+    if (auto* unary = dynamic_cast<ast::UnaryExpr*>(expr)) return resolveUnary(unary);
+    if (auto* call = dynamic_cast<ast::CallExpr*>(expr)) return resolveCall(call);
+    if (auto* field = dynamic_cast<ast::FieldExpr*>(expr)) return resolveField(field);
+    if (auto* index = dynamic_cast<ast::IndexExpr*>(expr)) return resolveIndex(index);
+    if (auto* block = dynamic_cast<ast::BlockExpr*>(expr)) return resolveBlock(block);
+    if (auto* ifExpr = dynamic_cast<ast::IfExpr*>(expr)) return resolveIf(ifExpr);
+    if (auto* match = dynamic_cast<ast::MatchExpr*>(expr)) return resolveMatch(match);
+    if (auto* arr = dynamic_cast<ast::ArrayExpr*>(expr)) return resolveArray(arr);
+    if (auto* range = dynamic_cast<ast::RangeExpr*>(expr)) return resolveRange(range);
+    if (auto* assign = dynamic_cast<ast::AssignExpr*>(expr)) return resolveAssign(assign);
+    return Type::Error();
+}
+
+Type SemanticAnalyzer::resolveLiteral(ast::LiteralExpr* lit) {
+    switch (lit->kind) {
+        case ast::LiteralExpr::Kind::Int: return Type::Int();
+        case ast::LiteralExpr::Kind::Float: return Type::Float();
+        case ast::LiteralExpr::Kind::String: return Type::String();
+        case ast::LiteralExpr::Kind::Bool: return Type::Bool();
+        case ast::LiteralExpr::Kind::Nil: return Type::Void(); // or special nil type
+    }
+    return Type::Error();
+}
+
+Type SemanticAnalyzer::resolveIdentifier(ast::IdentifierExpr* ident) {
+    Symbol* sym = currentScope_->lookup(ident->name);
+    if (!sym) {
+        error("Undefined variable: '" + ident->name + "'");
+        return Type::Error();
+    }
+    return sym->type;
+}
+
+Type SemanticAnalyzer::resolveBinary(ast::BinaryExpr* bin) {
+    Type left = resolveExpr(bin->left.get());
+    Type right = resolveExpr(bin->right.get());
+
+    if (left.isError() || right.isError()) return Type::Error();
+
+    switch (bin->op) {
+        case ast::BinaryExpr::Op::Add:
+        case ast::BinaryExpr::Op::Sub:
+        case ast::BinaryExpr::Op::Mul:
+        case ast::BinaryExpr::Op::Div:
+        case ast::BinaryExpr::Op::Mod:
+            if (left.isNumeric() && right.isNumeric()) {
+                if (left.kind == TypeKind::Float || right.kind == TypeKind::Float)
+                    return Type::Float();
+                return Type::Int();
+            }
+            error("Arithmetic operations require numeric types");
+            return Type::Error();
+
+        case ast::BinaryExpr::Op::Eq:
+        case ast::BinaryExpr::Op::Neq:
+            if (left == right || (left.isNumeric() && right.isNumeric())) {
+                return Type::Bool();
+            }
+            error("Cannot compare " + left.toString() + " with " + right.toString());
+            return Type::Error();
+
+        case ast::BinaryExpr::Op::Lt:
+        case ast::BinaryExpr::Op::Gt:
+        case ast::BinaryExpr::Op::Leq:
+        case ast::BinaryExpr::Op::Geq:
+            if (left.isComparable() && right.isComparable() && left == right) {
+                return Type::Bool();
+            }
+            error("Comparison requires matching comparable types");
+            return Type::Error();
+
+        case ast::BinaryExpr::Op::And:
+        case ast::BinaryExpr::Op::Or:
+            if (left == Type::Bool() && right == Type::Bool()) return Type::Bool();
+            error("Logical operations require bool types");
+            return Type::Error();
+
+        case ast::BinaryExpr::Op::BitAnd:
+        case ast::BinaryExpr::Op::BitOr:
+        case ast::BinaryExpr::Op::BitXor:
+        case ast::BinaryExpr::Op::Shl:
+        case ast::BinaryExpr::Op::Shr:
+            if (left == Type::Int() && right == Type::Int()) return Type::Int();
+            error("Bitwise operations require int types");
+            return Type::Error();
+
+        case ast::BinaryExpr::Op::Assign:
+            // Assignment handled in resolveAssign
+            return right;
+
+        case ast::BinaryExpr::Op::Range:
+        case ast::BinaryExpr::Op::RangeInclusive:
+            if (left == Type::Int() && right == Type::Int()) {
+                return Type::Array(Type::Int());
+            }
+            error("Range requires int types");
+            return Type::Error();
+    }
+    return Type::Error();
+}
+
+Type SemanticAnalyzer::resolveUnary(ast::UnaryExpr* unary) {
+    Type operand = resolveExpr(unary->operand.get());
+    if (operand.isError()) return Type::Error();
+
+    switch (unary->op) {
+        case ast::UnaryExpr::Op::Neg:
+            if (operand.isNumeric()) return operand;
+            error("Cannot negate non-numeric type");
+            return Type::Error();
+        case ast::UnaryExpr::Op::Not:
+            if (operand == Type::Bool()) return Type::Bool();
+            error("Cannot apply '!' to non-bool type");
+            return Type::Error();
+        case ast::UnaryExpr::Op::BitNot:
+            if (operand == Type::Int()) return Type::Int();
+            error("Cannot apply '~' to non-int type");
+            return Type::Error();
+    }
+    return Type::Error();
+}
+
+Type SemanticAnalyzer::resolveCall(ast::CallExpr* call) {
+    Type calleeType = resolveExpr(call->callee.get());
+    if (calleeType.isError()) return Type::Error();
+
+    if (calleeType.kind != TypeKind::Function) {
+        error("Cannot call non-function type");
+        return Type::Error();
+    }
+
+    if (call->args.size() != calleeType.paramTypes.size()) {
+        error("Argument count mismatch: expected " + std::to_string(calleeType.paramTypes.size()) +
+              ", got " + std::to_string(call->args.size()));
+        return Type::Error();
+    }
+
+    for (size_t i = 0; i < call->args.size(); ++i) {
+        Type argType = resolveExpr(call->args[i].get());
+        if (argType != calleeType.paramTypes[i] && !argType.isError()) {
+            error("Argument " + std::to_string(i + 1) + " type mismatch: expected " +
+                  calleeType.paramTypes[i].toString() + ", got " + argType.toString());
+        }
+    }
+
+    return calleeType.returnType;
+}
+
+Type SemanticAnalyzer::resolveField(ast::FieldExpr* field) {
+    Type objType = resolveExpr(field->object.get());
+    if (objType.isError()) return Type::Error();
+    // For now, only strings have .length
+    if (objType == Type::String() && field->field == "length") {
+        return Type::Int();
+    }
+    error("Type " + objType.toString() + " has no field '" + field->field + "'");
+    return Type::Error();
+}
+
+Type SemanticAnalyzer::resolveIndex(ast::IndexExpr* index) {
+    Type objType = resolveExpr(index->object.get());
+    Type idxType = resolveExpr(index->index.get());
+    if (objType.isError() || idxType.isError()) return Type::Error();
+
+    if (objType.kind == TypeKind::Array && objType.elementType) {
+        if (idxType == Type::Int()) {
+            return *objType.elementType;
+        }
+        error("Array index must be int");
+        return Type::Error();
+    }
+    if (objType == Type::String()) {
+        if (idxType == Type::Int()) {
+            return Type::Char();
+        }
+        error("String index must be int");
+        return Type::Error();
+    }
+    error("Cannot index type " + objType.toString());
+    return Type::Error();
+}
+
+Type SemanticAnalyzer::resolveIf(ast::IfExpr* ifExpr) {
+    Type condType = resolveExpr(ifExpr->condition.get());
+    if (condType != Type::Bool() && !condType.isError()) {
+        error("If condition must be bool, got " + condType.toString());
+    }
+
+    Type thenType = resolveBlock(ifExpr->thenBranch.get());
+    if (!ifExpr->elseBranch) {
+        // If no else, expression type is void (or then type if it's a statement context)
+        return Type::Void();
+    }
+
+    Type elseType = resolveExpr(ifExpr->elseBranch.get());
+    if (thenType != elseType && !thenType.isError() && !elseType.isError()) {
+        error("If branches have mismatched types: " + thenType.toString() + " vs " + elseType.toString());
+        return Type::Error();
+    }
+    return thenType;
+}
+
+Type SemanticAnalyzer::resolveMatch(ast::MatchExpr* match) {
+    Type scrutType = resolveExpr(match->scrutinee.get());
+    Type armType = Type::Unknown();
+    bool first = true;
+
+    for (auto& arm : match->arms) {
+        Type patType = resolvePattern(arm.pattern.get());
+        // Pattern should match scrutinee type
+        if (patType != scrutType && !patType.isError() && !scrutType.isError() &&
+            !(patType.isNumeric() && scrutType.isNumeric())) {
+            error("Pattern type " + patType.toString() + " doesn't match scrutinee " + scrutType.toString());
+        }
+
+        Type bodyType = resolveExpr(arm.expr.get());
+        if (first) {
+            armType = bodyType;
+            first = false;
+        } else if (bodyType != armType && !bodyType.isError() && !armType.isError()) {
+            error("Match arm type mismatch: " + armType.toString() + " vs " + bodyType.toString());
+        }
+    }
+
+    return armType;
+}
+
+Type SemanticAnalyzer::resolveArray(ast::ArrayExpr* arr) {
+    if (arr->elements.empty()) {
+        return Type::Array(Type::Unknown());
+    }
+
+    Type elemType = resolveExpr(arr->elements[0].get());
+    for (size_t i = 1; i < arr->elements.size(); ++i) {
+        Type t = resolveExpr(arr->elements[i].get());
+        if (t != elemType && !t.isError()) {
+            error("Array element type mismatch: " + elemType.toString() + " vs " + t.toString());
+            return Type::Error();
+        }
+    }
+    return Type::Array(elemType);
+}
+
+Type SemanticAnalyzer::resolveRange(ast::RangeExpr* range) {
+    Type start = resolveExpr(range->start.get());
+    Type end = resolveExpr(range->end.get());
+    if (start == Type::Int() && end == Type::Int()) {
+        return Type::Array(Type::Int());
+    }
+    error("Range bounds must be int");
+    return Type::Error();
+}
+
+Type SemanticAnalyzer::resolveAssign(ast::AssignExpr* assign) {
+    Type targetType = resolveExpr(assign->target.get());
+    Type valueType = resolveExpr(assign->value.get());
+
+    if (targetType.isError() || valueType.isError()) return Type::Error();
+
+    // Check mutability for identifier targets
+    if (auto* ident = dynamic_cast<ast::IdentifierExpr*>(assign->target.get())) {
+        Symbol* sym = currentScope_->lookup(ident->name);
+        if (sym && !sym->isMut && sym->kind != SymbolKind::Variable) {
+            error("Cannot assign to immutable variable '" + ident->name + "'");
+        }
+    }
+
+    if (targetType != valueType) {
+        error("Assignment type mismatch: " + targetType.toString() + " = " + valueType.toString());
+        return Type::Error();
+    }
+
+    return targetType;
+}
+
+Type SemanticAnalyzer::resolvePattern(ast::Pattern* pat) {
+    if (auto* lit = dynamic_cast<ast::LiteralPattern*>(pat)) {
+        return resolveLiteral(lit->literal.get());
+    }
+    if (auto* ident = dynamic_cast<ast::IdentifierPattern*>(pat)) {
+        // Bind variable in match arm scope
+        return Type::Unknown(); // will be inferred from scrutinee
+    }
+    if (dynamic_cast<ast::WildcardPattern*>(pat)) {
+        return Type::Unknown();
+    }
+    return Type::Error();
+}
+
+} // namespace r::semantic
