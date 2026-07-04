@@ -1,0 +1,84 @@
+#ifndef R_COMPILER_H
+#define R_COMPILER_H
+
+#include "bytecode/chunk.h"
+#include "ast/ast.h"
+#include <vector>
+#include <string>
+#include <unordered_map>
+
+namespace r::vm {
+
+struct Local {
+    std::string name;
+    int depth;
+    bool isMutable;
+};
+
+class Compiler {
+public:
+    explicit Compiler(Chunk* chunk);
+    void compile(ast::Program* program);
+
+private:
+    Chunk* chunk_;
+    std::vector<Local> locals_;
+    int scopeDepth_;
+    std::vector<size_t> breakJumps_;
+    std::vector<size_t> continueStarts_;
+
+    void emit(uint8_t byte);
+    void emit(OpCode op);
+    void emit(OpCode op, uint8_t operand);
+    size_t emitJump(OpCode op);
+    void patchJump(size_t offset);
+    void emitLoop(size_t loopStart);
+    void emitConstant(const Value& value);
+    size_t makeConstant(const Value& value);
+    void emitReturn();
+
+    void beginScope();
+    void endScope();
+
+    int resolveLocal(const std::string& name);
+    void addLocal(const std::string& name, bool isMutable);
+    void declareVariable(const std::string& name, bool isMutable);
+    void defineVariable(const std::string& name);
+    void namedVariable(const std::string& name, bool canAssign);
+
+    void compileItem(ast::Item* item);
+    void compileFunction(ast::FunctionItem* func);
+    void compileLetItem(ast::LetItem* item);
+    void compileConstItem(ast::ConstItem* item);
+
+    void compileStmt(ast::Stmt* stmt);
+    void compileLetStmt(ast::LetStmt* stmt);
+    void compileConstStmt(ast::ConstStmt* stmt);
+    void compileExprStmt(ast::ExprStmt* stmt);
+    void compileIfStmt(ast::IfStmt* stmt);
+    void compileWhileStmt(ast::WhileStmt* stmt);
+    void compileForStmt(ast::ForStmt* stmt);
+    void compileReturnStmt(ast::ReturnStmt* stmt);
+    void compileBreakStmt(ast::BreakStmt* stmt);
+    void compileContinueStmt(ast::ContinueStmt* stmt);
+
+    void compileExpr(ast::Expr* expr);
+    void compileLiteral(ast::LiteralExpr* lit);
+    void compileIdentifier(ast::IdentifierExpr* ident);
+    void compileBinary(ast::BinaryExpr* bin);
+    void compileUnary(ast::UnaryExpr* unary);
+    void compileCall(ast::CallExpr* call);
+    void compileField(ast::FieldExpr* field);
+    void compileIndex(ast::IndexExpr* index);
+    void compileBlock(ast::BlockExpr* block);
+    void compileIf(ast::IfExpr* ifExpr);
+    void compileMatch(ast::MatchExpr* match);
+    void compileArray(ast::ArrayExpr* arr);
+    void compileRange(ast::RangeExpr* range);
+    void compileAssign(ast::AssignExpr* assign);
+    void compilePattern(ast::Pattern* pat);
+};
+
+} // namespace r::vm
+
+#endif
