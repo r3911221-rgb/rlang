@@ -9,7 +9,7 @@ void VM::execute(Chunk* chunk) {
     ip_ = 0;
     stack_.clear();
     globals_.clear();
-    globals_["println"] = Value::string_("println");
+    globals_["puts"] = Value::string_("puts");
     globals_["print"] = Value::string_("print");
     run();
 }
@@ -63,7 +63,7 @@ bool VM::callValue(const Value& callee, uint8_t argCount) {
     }
     pop();
 
-    if (callee.isString() && callee.s == "println") {
+    if (callee.isString() && (callee.s == "puts" || callee.s == "println")) {
         if (args.size() >= 1) std::cout << args[0].toString() << "\n";
         push(Value::nil());
         return true;
