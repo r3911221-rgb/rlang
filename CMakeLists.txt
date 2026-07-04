@@ -10,6 +10,10 @@ add_executable(r
     src/ast/ast.cpp
     src/parser/parser.cpp
     src/semantic/semantic.cpp
+    src/bytecode/value.cpp
+    src/bytecode/chunk.cpp
+    src/bytecode/compiler.cpp
+    src/bytecode/vm.cpp
 )
 
 target_include_directories(r PRIVATE src)
