@@ -1,0 +1,38 @@
+#include "bytecode/value.h"
+
+namespace r::vm {
+
+std::string Value::toString() const {
+    switch (type) {
+        case ValueType::Nil: return "nil";
+        case ValueType::Bool: return as.b ? "true" : "false";
+        case ValueType::Int: return std::to_string(as.i);
+        case ValueType::Float: return std::to_string(as.f);
+        case ValueType::String: return s;
+        case ValueType::Array: {
+            std::string result = "[";
+            for (size_t i = 0; i < array.size(); ++i) {
+                if (i > 0) result += ", ";
+                result += array[i].toString();
+            }
+            result += "]";
+            return result;
+        }
+    }
+    return "?";
+}
+
+bool Value::operator==(const Value& other) const {
+    if (type != other.type) return false;
+    switch (type) {
+        case ValueType::Nil: return true;
+        case ValueType::Bool: return as.b == other.as.b;
+        case ValueType::Int: return as.i == other.as.i;
+        case ValueType::Float: return as.f == other.as.f;
+        case ValueType::String: return s == other.s;
+        case ValueType::Array: return array == other.array;
+    }
+    return false;
+}
+
+} // namespace r::vm
